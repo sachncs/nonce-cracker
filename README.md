@@ -1,0 +1,297 @@
+# nonce-cracker
+
+[![Build](https://img.shields.io/github/actions/workflow/status/sachn-cs/nonce-cracker/ci.yml?style=flat-square)](https://github.com/sachn-cs/nonce-cracker/actions)
+[![crate](https://img.shields.io/crates/v/nonce-cracker?style=flat-square)](https://crates.io/crates/nonce-cracker)
+[![docs](https://img.shields.io/docsrs/nonce-cracker?style=flat-square)](https://docs.rs/nonce-cracker)
+
+High-speed parallel ECDSA private key recovery for secp256k1 using an affine relation attack.
+
+## Overview
+
+`nonce-cracker` recovers private keys from two ECDSA signatures that share a nonce (`k`). When two secp256k1 signatures reuse a nonce with a linear relationship `k' = α·k + β`, a mathematical relationship emerges that allows computation of the private key via:
+
+```
+d = α·δ + β (mod n)
+```
+
+The tool precomputes α and β using arbitrary-precision integers, then searches over δ values in parallel across CPU cores.
+
+## Features
+
+- **Parallel search** across CPU cores via Rayon (work-stealing scheduler)
+- **x-only pubkey precheck** for fast filtering before full verification
+- **BigInt precision** for cryptographic calculations (no overflow risk)
+- **Configurable search range** with decimal or hex notation
+- **Two CLI interfaces**: `run` (ECDSA order: r1, r2, s1, s2, z1, z2) and `recover` (user-specified order: r1, s1, z1, r2, s2, z2)
+- **Thread count control** with automatic CPU detection fallback
+
+## Requirements
+
+- **Rust**: 1.75+ (stable)
+- **OS**: macOS, Linux, Windows (any platform with Rust support)
+- **CPU**: Multi-core recommended for parallel search
+
+## Installation
+
+### From crates.io
+
+```bash
+cargo install nonce-cracker
+```
+
+### From source
+
+```bash
+git clone https://github.com/sachn-cs/nonce-cracker.git
+cd nonce-cracker
+cargo build --release
+./target/release/nonce-cracker --help
+```
+
+### With Make
+
+```bash
+make build    # Release build
+make test     # Run tests
+make clippy   # Run lints
+```
+
+## Quick Start
+
+### Run the demonstration
+
+```bash
+nonce-cracker example
+```
+
+This runs a self-contained demonstration that recovers private key `0x3039` by searching a 3-value range. It proves the tool works correctly with verifiable output.
+
+### Recover a private key
+
+```bash
+nonce-cracker recover \
+  --r1 0x37a4aef1f8423ca076e4b7d99a8cabff40ddb8231f2a9f01081f15d7fa65c1ba \
+  --s1 0xe026eb94e61bcdc41f0ee8cd7b97eda899ce5856d3a32360d742b13d717ff2a8 \
+  --z1 0x0000000000000000000000000000000000000000000000000000000000000001 \
+  --r2 0xba5aec8a54a3a56fcd1bf17bceba9c4fad7103abf06669748b66578d03e0de12 \
+  --s2 0x31bc5dd7d522300c1a3fa117322581571329a2af3ba0d1a9b72d3c36eeac3ec7 \
+  --z2 0x0000000000000000000000000000000000000000000000000000000000000002 \
+  --pubkey 03f01d6b9018ab421dd410404cb869072065522bf85734008f105cf385a023a80f
+```
+
+### Or use the `run` command (ECDSA signature order)
+
+```bash
+nonce-cracker run \
+  --r1 <hex> --r2 <hex> --s1 <hex> --s2 <hex> --z1 <hex> --z2 <hex> \
+  --pubkey <hex>
+```
+
+## Usage
+
+### Global options
+
+| Flag | Description |
+|------|-------------|
+| `-h`, `--help` | Print help |
+| `-V`, `--version` | Print version |
+
+### Subcommands
+
+#### `run`
+
+Search with signature values in ECDSA order (r1, r2, s1, s2, z1, z2).
+
+```bash
+nonce-cracker run [OPTIONS]
+```
+
+#### `recover`
+
+Search with signature values in user-specified order (r1, s1, z1, r2, s2, z2).
+
+```bash
+nonce-cracker recover [OPTIONS]
+```
+
+#### `example`
+
+Run a self-contained demonstration with verifiable output.
+
+```bash
+nonce-cracker example
+```
+
+### Command options
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--r1 <HEX>` | R coordinate of first signature | Required |
+| `--r2 <HEX>` | R coordinate of second signature | Required |
+| `--s1 <HEX>` | S value of first signature | Required |
+| `--s2 <HEX>` | S value of second signature | Required |
+| `--z1 <HEX>` | Message hash of first signature | Required |
+| `--z2 <HEX>` | Message hash of second signature | Required |
+| `--pubkey <HEX>` | Target public key (uncompressed or compressed) | Required |
+| `--start <NUM>` | Search range start (decimal or `0x` hex) | `0` |
+| `--end <NUM>` | Search range end | `0x1000000000000000` (2^60) |
+| `--step <NUM>` | Search step size | `1` |
+| `--threads <NUM>` | Worker thread count | CPU core count |
+| `--quiet` | Suppress console output | `false` |
+| `--outfile <PATH>` | Output log file path | `search.log` |
+
+### Input formats
+
+**Signature values** (r1, r2, s1, s2, z1, z2):
+- Hex with `0x` prefix: `0x59b22000...`
+- Hex without prefix: `59b22000...`
+- Odd-length hex is auto-padded: `0xFFF` → `0x0FFF`
+
+**Public key**:
+- Uncompressed: `04` + x (32 bytes) + y (32 bytes) → 130 hex chars
+- Compressed even y: `02` + x (32 bytes) → 66 hex chars
+- Compressed odd y: `03` + x (32 bytes) → 66 hex chars
+
+**Range values** (start, end, step):
+- Decimal: `1000000`
+- Hex: `0xFF`
+
+## Project Structure
+
+```
+nonce-cracker/
+├── src/
+│   └── main.rs          # Binary entry point, CLI, search logic
+├── tests/
+│   └── integration.rs   # CLI integration tests
+├── benches/
+│   └── search.rs        # Criterion benchmarks
+├── examples/
+│   ├── demo.rs         # Usage demonstration
+│   └── generate.rs     # Test data generator
+├── Cargo.toml
+├── rust-toolchain.toml
+├── Makefile
+└── README.md
+```
+
+### Module overview
+
+- **CLI** (`main.rs`): Command-line argument parsing via `clap`
+- **Crypto** (`main.rs`): `mod_inverse`, `precompute`, `normalize` for affine relation math
+- **Search** (`main.rs`): Parallel search orchestration via Rayon
+
+## Algorithm
+
+### ECDSA signatures
+
+In ECDSA, a signature `(r, s)` is computed as:
+
+```
+r = (k·G).x mod n
+s = k⁻¹(z + r·d) mod n
+```
+
+Where:
+- `k` is the nonce (ephemeral key)
+- `G` is the generator point
+- `n` is the curve order (secp256k1)
+- `d` is the private key
+- `z` is the message hash
+
+### Affine relation attack
+
+When two signatures share a nonce with linear relation `k' = α·k + β`, the private key can be recovered via:
+
+```
+d = α·δ + β (mod n)
+```
+
+The tool:
+1. Precomputes α and β from the two signatures using BigInt
+2. Converts α, β to scalars for fast per-iteration arithmetic
+3. Searches over δ values in parallel, computing candidate private keys
+4. Compares each candidate against the target public key
+5. Reports the match (if found) with the discovered δ and d
+
+### Performance
+
+- **Per thread**: ~1–5 million keys/second (varies by hardware)
+- **Scaling**: Near-linear with CPU core count
+- **Memory**: ~10 MB base, ~1 MB per additional thread
+
+## Exit Codes
+
+| Code | Meaning |
+|------|---------|
+| `0` | Success (key found or search complete) |
+| `1` | Error (invalid input, file I/O, etc.) |
+
+## Error Handling
+
+The tool returns descriptive errors for common failure modes:
+
+| Error | Cause | Solution |
+|-------|-------|----------|
+| `hex parse error` | Invalid hex string | Check signature values |
+| `public key parse error` | Invalid pubkey format | Use 02, 03, or 04 prefix |
+| `number parse error` | Invalid number format | Use decimal or `0x` prefix |
+| `out of range` | `end < start` or alpha/beta overflow | Set valid range |
+| `calculation error` | No modular inverse exists | Signature values may be invalid |
+
+## Testing
+
+```bash
+# Run all tests
+cargo test
+
+# Run with output
+cargo test -- --nocapture
+
+# Run specific test
+cargo test test_mod_inverse
+
+# Run doc tests
+cargo test --doc
+
+# With make
+make test
+```
+
+## Benchmarking
+
+```bash
+# Run benchmarks
+cargo bench
+
+# View results
+# Open target/criterion/report/index.html
+```
+
+Benchmarks cover:
+- `mod_inverse`: Extended Euclidean algorithm
+- `precompute`: Alpha/beta constant computation
+- `compute_d`: Scalar arithmetic for candidate keys
+- `point_multiplication`: Elliptic curve point multiplication
+- `scalar_from_bigint`: BigInt to scalar conversion
+- `search_chunk`: Full search iteration throughput
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for:
+- Development setup
+- Coding standards
+- Testing guidelines
+- Pull request process
+
+## License
+
+Licensed under either of:
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
+- MIT license ([LICENSE-MIT])
+
+at your option.
+
+## Disclaimer
+
+This project is intended for **educational and research purposes only**. The author is not responsible for any misuse, damage, or illegal activities conducted using this software.

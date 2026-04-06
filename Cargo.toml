@@ -1,0 +1,50 @@
+[package]
+name = "nonce-cracker"
+version = "0.1.0"
+edition = "2021"
+authors = ["nonce-cracker contributors"]
+license = "MIT OR Apache-2.0"
+description = "High-speed parallel ECDSA private key recovery for secp256k1 using affine relation attack"
+repository = "https://github.com/sachn-cs/nonce-cracker"
+homepage = "https://github.com/sachn-cs/nonce-cracker"
+documentation = "https://docs.rs/nonce-cracker"
+keywords = ["ecdsa", "secp256k1", "cryptography", "bitcoin"]
+categories = ["cryptography", "command-line-utilities"]
+readme = "README.md"
+
+[dependencies]
+# CLI argument parsing
+clap = { version = "4", features = ["derive"] }
+
+# Cryptography
+hex = "0.4"
+k256 = { version = "0.13", default-features = false, features = ["arithmetic", "ecdsa", "pkcs8", "std"] }
+
+# Big integer arithmetic
+num-bigint = "0.4"
+num-traits = "0.2"
+
+# Parallel processing
+rayon = "1.8"
+
+# Logging
+parking_lot = "0.12"
+
+# Logging
+log = "0.4"
+env_logger = "0.11"
+
+[dev-dependencies]
+# Integration testing
+assert_cmd = "2"
+
+# Benchmarking
+criterion = "0.5"
+
+[[bench]]
+name = "search"
+harness = false
+
+# Coverage
+[profile.dev]
+incremental = true
