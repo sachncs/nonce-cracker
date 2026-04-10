@@ -7,6 +7,26 @@
 //! - Error handling
 
 use assert_cmd::Command;
+use k256::{
+    elliptic_curve::{sec1::ToEncodedPoint, PrimeField},
+    ProjectivePoint, Scalar,
+};
+use num_bigint::{BigInt, Sign};
+use num_traits::Signed;
+use std::{
+    path::PathBuf,
+    time::{SystemTime, UNIX_EPOCH},
+};
+
+fn temp_log_dir(prefix: &str) -> PathBuf {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let path = std::env::temp_dir().join(format!("{prefix}_{}_{}", std::process::id(), nanos));
+    std::fs::create_dir_all(&path).expect("temporary log directory should be creatable");
+    path
+}
 
 /// Tests that `--help` flag displays help and lists all commands.
 ///
@@ -23,7 +43,12 @@ fn test_help_flag() {
         .output()
         .expect("Failed to execute command");
 
-    assert!(output.status.success());
+    assert!(
+        output.status.success(),
+        "command failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("nonce-cracker"));
     assert!(stdout.contains("run"));
@@ -39,16 +64,30 @@ fn test_help_flag() {
 /// - Demo runs with predefined test values and recovers a private key
 #[test]
 fn test_example_command() {
+    let log_dir = temp_log_dir("nonce_cracker_example");
     let output = Command::cargo_bin("nonce-cracker")
         .expect("Binary should be built")
+        .env("NONCE_CRACKER_LOG_DIR", &log_dir)
         .args(["example"])
         .output()
         .expect("Failed to execute command");
 
     // Example should complete successfully (recovers d = 0x3039 in the demo case)
-    assert!(output.status.success());
+    assert!(
+        output.status.success(),
+        "command failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("FOUND"));
+    assert!(stdout.contains("status=found"));
+
+    let report = std::fs::read_to_string(log_dir.join("example.log"))
+        .expect("example report should be written");
+    assert!(report.contains("FOUND delta=1"));
+    let app_log = std::fs::read_to_string(log_dir.join("nonce-cracker.log"))
+        .expect("application log should be written");
+    assert!(app_log.contains("event=search_result"));
 }
 
 /// Tests that `run` command fails without required arguments.
@@ -153,8 +192,10 @@ fn test_invalid_range() {
 /// Tests that `recover` command with valid test data finds the private key.
 #[test]
 fn test_recover_with_valid_data() {
+    let log_dir = temp_log_dir("nonce_cracker_recover");
     let output = Command::cargo_bin("nonce-cracker")
         .expect("Binary should be built")
+        .env("NONCE_CRACKER_LOG_DIR", &log_dir)
         .args([
             "recover",
             "--r1",
@@ -175,20 +216,33 @@ fn test_recover_with_valid_data() {
             "0",
             "--end",
             "10",
+            "--outfile",
+            "recover_valid.log",
         ])
         .output()
         .expect("Failed to execute command");
 
-    assert!(output.status.success());
+    assert!(
+        output.status.success(),
+        "command failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("FOUND"));
+    assert!(stdout.contains("status=found"));
+
+    let report = std::fs::read_to_string(log_dir.join("recover_valid.log"))
+        .expect("recover report should be written");
+    assert!(report.contains("FOUND delta=1"));
 }
 
 /// Tests that `run` command with valid test data finds the private key.
 #[test]
 fn test_run_with_valid_data() {
+    let log_dir = temp_log_dir("nonce_cracker_run");
     let output = Command::cargo_bin("nonce-cracker")
         .expect("Binary should be built")
+        .env("NONCE_CRACKER_LOG_DIR", &log_dir)
         .args([
             "run",
             "--r1",
@@ -209,11 +263,150 @@ fn test_run_with_valid_data() {
             "0",
             "--end",
             "10",
+            "--outfile",
+            "run_valid.log",
         ])
         .output()
         .expect("Failed to execute command");
 
-    assert!(output.status.success());
+    assert!(
+        output.status.success(),
+        "command failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("FOUND"));
+    assert!(stdout.contains("status=found"));
+
+    let report = std::fs::read_to_string(log_dir.join("run_valid.log"))
+        .expect("run report should be written");
+    assert!(report.contains("FOUND delta=1"));
+}
+
+/// Tests that the binary accepts a signed delta window and writes the expected result.
+#[test]
+fn test_run_with_negative_delta_window() {
+    let log_dir = temp_log_dir("nonce_cracker_negative_delta");
+    let outfile = "negative_delta.log";
+    let fixture = negative_delta_fixture();
+
+    let output = Command::cargo_bin("nonce-cracker")
+        .expect("Binary should be built")
+        .env("NONCE_CRACKER_LOG_DIR", &log_dir)
+        .args([
+            "run",
+            "--r1",
+            &fixture.r1,
+            "--r2",
+            &fixture.r2,
+            "--s1",
+            &fixture.s1,
+            "--s2",
+            &fixture.s2,
+            "--z1",
+            "0x0000000000000000000000000000000000000000000000000000000000000001",
+            "--z2",
+            "0x0000000000000000000000000000000000000000000000000000000000000002",
+            "--pubkey",
+            &fixture.pubkey,
+            "--start",
+            "-2",
+            "--end",
+            "0",
+            "--outfile",
+            outfile,
+        ])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(
+        output.status.success(),
+        "command failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("status=found"));
+
+    let log = std::fs::read_to_string(log_dir.join(outfile)).expect("log file should be written");
+    assert!(log.contains("FOUND delta=-1"));
+    let app_log = std::fs::read_to_string(log_dir.join("nonce-cracker.log"))
+        .expect("application log should be written");
+    assert!(app_log.contains("event=search_result"));
+}
+
+struct NegativeDeltaFixture {
+    r1: String,
+    r2: String,
+    s1: String,
+    s2: String,
+    pubkey: String,
+}
+
+fn negative_delta_fixture() -> NegativeDeltaFixture {
+    // Keep the fixture deterministic so the CLI test exercises the exact same
+    // additive nonce relation as the unit-level derivation tests.
+    let private_key = Scalar::from(0x3039u64);
+    let nonce = 0x1234u64;
+    let next_nonce = nonce
+        .checked_sub(1)
+        .expect("fixture delta must stay positive");
+    let curve_order = secp256k1_curve_order();
+
+    let r1 = r_value_from_nonce(nonce, &curve_order);
+    let r2 = r_value_from_nonce(next_nonce, &curve_order);
+    let r1_scalar = bigint_to_scalar(&r1);
+    let r2_scalar = bigint_to_scalar(&r2);
+
+    let s1 = signature_s_value(1u64, r1_scalar, private_key, nonce);
+    let s2 = signature_s_value(2u64, r2_scalar, private_key, next_nonce);
+    let pubkey = ProjectivePoint::GENERATOR * private_key;
+
+    NegativeDeltaFixture {
+        r1: bigint_to_hex(&r1),
+        r2: bigint_to_hex(&r2),
+        s1: bigint_to_hex(&s1),
+        s2: bigint_to_hex(&s2),
+        pubkey: hex::encode(pubkey.to_affine().to_encoded_point(true).as_bytes()),
+    }
+}
+
+fn signature_s_value(message_hash: u64, r: Scalar, private_key: Scalar, nonce: u64) -> BigInt {
+    let s = (Scalar::from(message_hash) + r * private_key)
+        * Scalar::from(nonce)
+            .invert()
+            .expect("nonce must be invertible in the scalar field");
+    BigInt::from_bytes_be(Sign::Plus, &s.to_bytes())
+}
+
+fn bigint_to_scalar(value: &BigInt) -> Scalar {
+    let (_, bytes) = value.to_bytes_be();
+    let mut wide = [0u8; 32];
+    wide[32 - bytes.len()..].copy_from_slice(&bytes);
+    Scalar::from_repr(wide.into()).expect("fixture value must fit in a scalar")
+}
+
+fn bigint_to_hex(value: &BigInt) -> String {
+    let (_, bytes) = value.to_bytes_be();
+    format!("0x{}", hex::encode(bytes))
+}
+
+fn r_value_from_nonce(nonce: u64, curve_order: &BigInt) -> BigInt {
+    let point = ProjectivePoint::GENERATOR * Scalar::from(nonce);
+    let encoded = point.to_affine().to_encoded_point(true);
+    let x = BigInt::from_bytes_be(Sign::Plus, &encoded.as_bytes()[1..33]);
+    let remainder = &x % curve_order;
+    if remainder.is_negative() {
+        remainder + curve_order
+    } else {
+        remainder
+    }
+}
+
+fn secp256k1_curve_order() -> BigInt {
+    BigInt::parse_bytes(
+        b"115792089237316195423570985008687907852837564279074904382605163141518161494337",
+        10,
+    )
+    .expect("valid curve order")
 }

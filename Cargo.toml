@@ -1,6 +1,6 @@
 [package]
 name = "nonce-cracker"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 authors = ["nonce-cracker contributors"]
 license = "MIT OR Apache-2.0"
@@ -32,7 +32,6 @@ parking_lot = "0.12"
 
 # Logging
 log = "0.4"
-env_logger = "0.11"
 
 [dev-dependencies]
 # Integration testing
@@ -48,3 +47,10 @@ harness = false
 # Coverage
 [profile.dev]
 incremental = true
+
+[profile.release]
+opt-level = 3
+codegen-units = 1
+lto = "thin"
+strip = "symbols"
+panic = "abort"

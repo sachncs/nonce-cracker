@@ -16,6 +16,27 @@ d = α·δ + β (mod n)
 
 The tool precomputes α and β using arbitrary-precision integers, then searches over δ values in parallel across CPU cores.
 
+## Architecture
+
+The repository is organized around a single binary crate with a small number of clearly separated responsibilities:
+
+- `src/main.rs` owns CLI parsing, signature validation, affine-constant derivation, bounded search orchestration, and report generation.
+- `src/logging.rs` owns the global logging backend, environment-based configuration, file rotation, and log-directory enforcement.
+- `tests/integration.rs` exercises the CLI end-to-end, including logging behavior and signed-range handling.
+- `benches/search.rs` mirrors the production arithmetic for performance regression tracking.
+- `docs/affine-relation-derivation.md` formalizes the algebra used by the recovery algorithm.
+
+Data flow is intentionally linear:
+
+1. CLI arguments are parsed and validated.
+2. Signature values are converted to `BigInt` and public keys to SEC1 `PublicKey` values.
+3. `derive_affine_constants` produces the affine parameters `alpha` and `beta`.
+4. The search partitions the signed delta interval across a dedicated Rayon pool.
+5. Each worker evaluates `d = alpha * delta + beta mod n`, reconstructs the corresponding public key, and compares it against the target.
+6. Matching results are written to the report file and summarized through the centralized logger.
+
+This architecture minimizes shared mutable state, keeps the cryptographic math isolated from logging concerns, and makes the CLI/test/benchmark surfaces align with the same search contract.
+
 ## Features
 
 - **Parallel search** across CPU cores via Rayon (work-stealing scheduler)
@@ -138,7 +159,18 @@ nonce-cracker example
 | `--step <NUM>` | Search step size | `1` |
 | `--threads <NUM>` | Worker thread count | CPU core count |
 | `--quiet` | Suppress console output | `false` |
-| `--outfile <PATH>` | Output log file path | `search.log` |
+| `--outfile <PATH>` | Search report file name or path | `search.log` |
+
+### Logging
+
+Application logs are written to a dedicated directory and rotated automatically:
+
+- `NONCE_CRACKER_LOG_DIR` - Directory for application logs and search reports. Default: `logs/`
+- `NONCE_CRACKER_LOG_LEVEL` - Log level for the backend logger (`error`, `warn`, `info`, `debug`, `trace`). Default: `info`
+- `NONCE_CRACKER_LOG_MAX_BYTES` - Rotate the active application log after this many bytes. Default: `1048576`
+- `NONCE_CRACKER_LOG_RETENTION` - Number of rotated application logs to keep. Default: `5`
+
+Relative `--outfile` values are resolved inside the configured log directory. Absolute paths are still accepted for explicit overrides.
 
 ### Input formats
 
@@ -161,6 +193,7 @@ nonce-cracker example
 ```
 nonce-cracker/
 ├── src/
+│   ├── logging.rs       # Centralized file logger, rotation, path resolution
 │   └── main.rs          # Binary entry point, CLI, search logic
 ├── tests/
 │   └── integration.rs   # CLI integration tests
@@ -208,17 +241,34 @@ d = α·δ + β (mod n)
 ```
 
 The tool:
-1. Precomputes α and β from the two signatures using BigInt
-2. Converts α, β to scalars for fast per-iteration arithmetic
-3. Searches over δ values in parallel, computing candidate private keys
-4. Compares each candidate against the target public key
-5. Reports the match (if found) with the discovered δ and d
+1. Parses and validates the two signatures, public key, and signed search bounds.
+2. Derives the linear coefficients `a`, `b`, and `c` used to solve the affine relation, then reduces them to `alpha` and `beta`.
+3. Converts `alpha` and `beta` to secp256k1 scalars when they fit in-field.
+4. Partitions the inclusive delta range `[start, end]` into fixed-size chunks and assigns them to worker threads.
+5. Evaluates `d(delta) = alpha * delta + beta mod n` for each candidate.
+6. Reconstructs the public key from each candidate and compares it first by x-coordinate, then by full SEC1 encoding.
+7. Stops on the first match, writes the report file, and emits a structured summary line.
+
+### Invariants and failure modes
+
+- The search window is inclusive and `step` must be strictly positive.
+- `end` must be greater than or equal to `start`.
+- `alpha` and `beta` must fit into 32-byte secp256k1 scalars before the fast path is used.
+- If the linear coefficient `a` is not invertible modulo the curve order, the affine system does not admit a unique solution and the search returns an error.
+- Empty report paths are rejected before file creation.
+
+### Complexity
+
+- **Time:** `O(N)` candidate evaluations in the worst case, where `N = floor((end - start) / step) + 1`.
+- **Space:** `O(1)` worker-local state, plus the report file and bounded coordination state.
+- **Parallelism:** Work is distributed across a dedicated Rayon pool, so wall-clock time scales with the number of useful CPU cores and the selectivity of the public-key precheck.
 
 ### Performance
 
 - **Per thread**: ~1–5 million keys/second (varies by hardware)
-- **Scaling**: Near-linear with CPU core count
+- **Scaling**: Near-linear with CPU core count for sufficiently large search windows
 - **Memory**: ~10 MB base, ~1 MB per additional thread
+- **Logging overhead**: Bounded by line-buffered file writes and size-based rotation; report-file writes are single-pass and do not allocate per candidate
 
 ## Exit Codes
 
