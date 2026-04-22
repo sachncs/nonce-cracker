@@ -103,8 +103,11 @@ use std::{
     thread,
     time::{SystemTime, UNIX_EPOCH},
 };
+use tracing::{error, info, warn, Level};
 
+mod config;
 mod logging;
+mod metrics;
 
 /// The secp256k1 curve order (n).
 ///
@@ -122,14 +125,18 @@ mod logging;
 /// The affine relation math itself is standard ECDSA mathematics.
 const CURVE_ORDER_HEX: &str = "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141";
 
-/// Maximum allowed thread count to prevent resource exhaustion.
-///
-/// Setting threads beyond this value is likely counterproductive
-/// as the search is memory-bound, not CPU-bound.
-const MAX_THREADS: usize = 256;
+// Note: max threads is now configured via config module
 
 /// Monotonic counter used to guarantee unique default log-file names.
 static LOG_FILE_SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Global shutdown flag for graceful termination.
+static SHUTDOWN_REQUESTED: AtomicBool = AtomicBool::new(false);
+
+/// Check if shutdown has been requested.
+fn is_shutdown_requested() -> bool {
+    SHUTDOWN_REQUESTED.load(Ordering::Relaxed)
+}
 
 /// Command-line argument parser.
 ///
@@ -442,15 +449,41 @@ type Result<T> = std::result::Result<T, Error>;
 
 /// Main entry point.
 ///
-/// The binary initializes logging before dispatching into the CLI branch so
-/// that all modules share the same backend and log directory policy.
-fn main() -> Result<()> {
+/// The binary initializes logging and configuration before dispatching
+/// into the CLI branch so that all modules share the same backend
+/// and configuration policy.
+fn main() {
+    // Initialize configuration from environment variables
+    if let Err(e) = config::Config::init() {
+        eprintln!("Failed to initialize configuration: {}", e);
+        std::process::exit(1);
+    }
+
+    if let Err(e) = logging::init_from_env() {
+        eprintln!("Failed to initialize logging: {}", e);
+        std::process::exit(1);
+    }
+
+    // Install signal handlers for graceful shutdown
+    setup_signal_handlers();
+
+    info!(
+        target: "nonce-cracker",
+        version = config::Config::get().version,
+        "starting nonce-cracker"
+    );
+
     let cli = Cli::parse();
-    logging::init_from_env()?;
 
-    match cli.command.unwrap_or(Commands::Example) {
-        Commands::Example => run_example_command(),
-
+    let exit_code = match cli.command.unwrap_or(Commands::Example) {
+        Commands::Example => {
+            if let Err(e) = run_example_command() {
+                error!(error = %e, "example command failed");
+                1
+            } else {
+                0
+            }
+        }
         Commands::Search {
             r1,
             r2,
@@ -479,8 +512,13 @@ fn main() -> Result<()> {
             threads,
             quiet,
             outfile,
-        }),
-
+        })
+        .map(|_| 0)
+        .map_err(|e| {
+            error!(error = %e, "search command failed");
+            1
+        })
+        .unwrap_or(1),
         Commands::Recover {
             r1,
             r2,
@@ -509,8 +547,48 @@ fn main() -> Result<()> {
             threads,
             quiet,
             outfile,
-        }),
-    }
+        })
+        .map(|_| 0)
+        .map_err(|e| {
+            error!(error = %e, "recover command failed");
+            1
+        })
+        .unwrap_or(1),
+    };
+
+    info!("shutting down gracefully");
+    std::process::exit(exit_code)
+}
+
+/// Setup signal handlers for graceful shutdown on SIGINT/SIGTERM.
+#[cfg(unix)]
+fn setup_signal_handlers() {
+    std::thread::spawn(|| {
+        let mut signals = signal_hook::iterator::Signals::new([
+            signal_hook::consts::SIGINT,
+            signal_hook::consts::SIGTERM,
+        ])
+        .expect("failed to create signal iterator");
+
+        for sig in signals.forever() {
+            match sig {
+                signal_hook::consts::SIGINT | signal_hook::consts::SIGTERM => {
+                    info!(
+                        signal = sig,
+                        "shutdown signal received, initiating graceful shutdown"
+                    );
+                    SHUTDOWN_REQUESTED.store(true, Ordering::SeqCst);
+                    break;
+                }
+                _ => {}
+            }
+        }
+    });
+}
+
+#[cfg(not(unix))]
+fn setup_signal_handlers() {
+    // Windows signal handling is more complex; for now, we skip it
 }
 
 /// Parses CLI arguments, validates them once, and executes the search.
@@ -678,17 +756,22 @@ fn search(
         return Err(Error::OutOfRange("step must be > 0".into()));
     }
 
-    // Validate and bound thread count
+    // Validate and bound thread count using config
+    let max_threads = config::Config::get().max_threads;
     let thread_count = match threads {
-        Some(t) if t > MAX_THREADS => {
-            log::warn!("Thread count {t} exceeds maximum {MAX_THREADS}, capping to {MAX_THREADS}");
-            MAX_THREADS
+        Some(t) if t > max_threads => {
+            warn!(
+                requested = t,
+                max = max_threads,
+                "thread count exceeds maximum, capping"
+            );
+            max_threads
         }
         Some(t) => t,
         None => thread::available_parallelism()
             .map(std::num::NonZeroUsize::get)
             .unwrap_or(1)
-            .min(MAX_THREADS),
+            .min(max_threads),
     };
 
     // Precompute affine relation constants
@@ -738,13 +821,16 @@ fn search(
     let found = Arc::new(AtomicBool::new(false));
     let result = Arc::new(parking_lot::Mutex::new(None::<i64>));
 
-    log::info!(
-        "search start=0x{:x} end=0x{:x} step={} threads={}",
-        start,
-        end,
-        step,
-        thread_count
+    info!(
+        search_start = start,
+        search_end = end,
+        step = step,
+        threads = thread_count,
+        "starting search"
     );
+
+    // Initialize metrics collection
+    let search_metrics = metrics::search_started(thread_count);
 
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(thread_count)
@@ -754,6 +840,9 @@ fn search(
     // Execute parallel search on a dedicated pool so --threads is honored.
     pool.install(|| {
         (0..thread_count).into_par_iter().for_each(|thread_id| {
+            if is_shutdown_requested() {
+                return;
+            }
             let chunk_start = thread_id as u128 * chunk;
             if chunk_start >= total || found.load(Ordering::Acquire) {
                 return;
@@ -771,7 +860,7 @@ fn search(
 
             // Search this chunk.
             for _ in 0..count {
-                if found.load(Ordering::Acquire) {
+                if found.load(Ordering::Acquire) || is_shutdown_requested() {
                     break;
                 }
                 if matches_target_public_key(&point, target_x_bytes, target_encoded_bytes) {
@@ -796,8 +885,9 @@ fn search(
         let d = derive_private_key(delta, alpha_scalar, beta_scalar);
         let hex = scalar_to_lower_hex(&d);
         writeln!(log_file, "FOUND delta={delta} d=0x{hex}")?;
+        metrics::search_completed(&search_metrics, true, Some(delta));
         logging::emit_summary(
-            log::Level::Info,
+            Level::INFO,
             format!(
                 "event=search_result status=found delta={delta} d=0x{hex} report={}",
                 output_log_path.display()
@@ -806,8 +896,9 @@ fn search(
         );
     } else {
         writeln!(log_file, "No key found in searched range.")?;
+        metrics::search_completed(&search_metrics, false, None);
         logging::emit_summary(
-            log::Level::Warn,
+            Level::WARN,
             format!(
                 "event=search_result status=missing report={}",
                 output_log_path.display()

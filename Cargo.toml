@@ -14,7 +14,7 @@ readme = "README.md"
 
 [dependencies]
 # CLI argument parsing
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4.5", features = ["derive"] }
 
 # Cryptography
 hex = "0.4"
@@ -27,11 +27,13 @@ num-traits = "0.2"
 # Parallel processing
 rayon = "1.8"
 
-# Logging
+# Concurrency
 parking_lot = "0.12"
+signal-hook = "0.3"
 
-# Logging
-log = "0.4"
+# Logging and Observability
+tracing = { version = "0.1", features = ["attributes"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
 
 [dev-dependencies]
 # Integration testing
@@ -39,6 +41,9 @@ assert_cmd = "2"
 
 # Benchmarking
 criterion = "0.5"
+
+# Hex literal parsing
+hex-literal = "0.4"
 
 [[bench]]
 name = "search"

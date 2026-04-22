@@ -18,13 +18,16 @@ The tool precomputes α and β using arbitrary-precision integers, then searches
 
 ## Architecture
 
-The repository is organized around a single binary crate with a small number of clearly separated responsibilities:
+The repository is organized around a single binary crate with production-ready separation of concerns:
 
-- `src/main.rs` owns CLI parsing, signature validation, affine-constant derivation, bounded search orchestration, and report generation.
-- `src/logging.rs` owns the global logging backend, environment-based configuration, file rotation, and log-directory enforcement.
-- `tests/integration.rs` exercises the CLI end-to-end, including logging behavior and signed-range handling.
-- `benches/search.rs` mirrors the production arithmetic for performance regression tracking.
-- `docs/affine-relation-derivation.md` formalizes the algebra used by the recovery algorithm.
+- `src/main.rs` - CLI parsing, signature validation, affine-constant derivation, bounded search orchestration, and graceful shutdown handling.
+- `src/logging.rs` - Structured logging backend using tracing, environment-based configuration, and multiple output formats (JSON, compact, pretty).
+- `src/config.rs` - Centralized configuration management with validation and environment variable support.
+- `src/metrics.rs` - Performance metrics collection for observability and monitoring.
+- `src/recover.rs` - Alternative high-performance recovery implementations.
+- `tests/integration.rs` - End-to-end CLI tests including logging behavior and signed-range handling.
+- `benches/search.rs` - Criterion benchmarks for performance regression tracking.
+- `docs/` - Architecture documentation and deployment guides.
 
 Data flow is intentionally linear:
 
@@ -39,12 +42,25 @@ This architecture minimizes shared mutable state, keeps the cryptographic math i
 
 ## Features
 
+### Core Functionality
+
 - **Parallel search** across CPU cores via Rayon (work-stealing scheduler)
 - **x-only pubkey precheck** for fast filtering before full verification
 - **BigInt precision** for cryptographic calculations (no overflow risk)
 - **Configurable search range** with decimal or hex notation
 - **Two CLI interfaces**: `run` (ECDSA order: r1, r2, s1, s2, z1, z2) and `recover` (user-specified order: r1, s1, z1, r2, s2, z2)
 - **Thread count control** with automatic CPU detection fallback
+
+### Production Features
+
+- **Structured logging** with tracing (JSON, compact, pretty formats)
+- **Graceful shutdown** handling for SIGINT/SIGTERM signals
+- **Configuration management** via environment variables
+- **Performance metrics** collection and reporting
+- **Docker support** with multi-stage builds
+- **CI/CD pipeline** with GitHub Actions (build, test, security audit)
+- **Dependency security** auditing with cargo-deny
+- **Health checks** and observability hooks
 
 ## Requirements
 
