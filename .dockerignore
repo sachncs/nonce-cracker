@@ -1,0 +1,37 @@
+# Build artifacts
+target/
+**/target/
+*.rs.bk
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Documentation (build it in the container)
+docs/
+*.md
+
+# Test and CI
+.github/
+.cargo/
+coverage/
+*.log
+logs/
+
+# Cargo-related files that shouldn't be in the container
+Cargo.lock.original
+
+# Misc
+*.tmp
+*.temp
