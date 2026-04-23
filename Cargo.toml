@@ -17,6 +17,7 @@ clap = { version = "4.5", features = ["derive"] }
 hex = "0.4"
 k256 = { version = "0.13", default-features = false, features = ["arithmetic", "ecdsa", "pkcs8", "std"] }
 rayon = "1.8"
+rustc-hash = "2"
 signal-hook = "0.3"
 tracing = { version = "0.1", features = ["attributes"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
