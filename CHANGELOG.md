@@ -7,8 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Hybrid search algorithm: automatically dispatches to parallel scan for N <= 2^32 candidates or parallel Baby-Step Giant-Step (BSGS) for 2^32 < N < 2^64 candidates.
+- Parallel BSGS implementation with thread-local baby-step hash maps, merged into a single lookup table.
+- Batched projective-to-affine normalization via `ProjectivePoint::batch_normalize` to amortize field inversion cost in BSGS.
+- Identity point handling in BSGS to avoid division-by-zero during batch normalization.
+- BSGS memory guard: `BSGS_MAX_M = 2^26` (~5 GB max), preventing unbounded memory usage.
+- Edge-case handling for `step_scalar == 0` (all candidates identical), short-circuiting without search.
+- Unit test `test_bsgs_small_range` verifying BSGS correctness directly.
+
 ### Changed
-- Future changes will be listed here after the 0.2.0 release.
+- Replaced arbitrary-precision BigInt arithmetic with native secp256k1 `Scalar` operations via `k256`, eliminating conversion overhead.
+- Replaced per-iteration `to_affine().to_encoded_point()` (field inversion, ~20us) with direct projective point equality comparison (~67ns), a ~300x hot-loop speedup.
+- Extracted scan logic into `parallel_scan()` function and search dispatch into `search()` for clarity.
+- Simplified logging to compact format only; removed JSON and pretty format branches.
+- Streamlined `Config` to `max_threads`, `log_dir`, and `version` only.
+- Streamlined `SearchMetrics` to `start` and `threads` only.
+- Replaced `i128` arithmetic in inner loop with `i64::wrapping_add` for performance.
+- Reduced atomic polling frequency to once per 1024 iterations to eliminate cache-line bouncing.
+- Unified CLI to single `run` command; removed `recover` subcommand.
+
+### Fixed
+- Corrected import of `BatchNormalize` trait to resolve `batch_normalize` usage.
+- Handled identity point explicitly in BSGS to prevent `batch_normalize` panic on zero-Z coordinates.
 
 ## [0.2.0] - 2026-04-10
 
@@ -45,12 +66,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CLI interface with clap
 - Unit tests for core cryptographic functions
 - Example mode for quick demonstration
-
-### Fixed
-- None
-
-### Deprecated
-- None
-
-### Security
-- None reported

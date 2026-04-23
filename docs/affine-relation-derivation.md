@@ -134,17 +134,18 @@ These are exactly the values computed by `derive_affine_constants`.
 
 The function computes:
 
-1. `u = modular_inverse(s1, n)`
-2. `a = normalize_modulo(s2 * r1 * u - r2, n)`
-3. `b = normalize_modulo(z2 - s2 * z1 * u, n)`
-4. `c = normalize_modulo(s2, n)`
-5. `a_inv = modular_inverse(a, n)`
-6. `alpha = normalize_modulo(-c * a_inv, n)`
-7. `beta = normalize_modulo(b * a_inv, n)`
+1. `u = s1.invert()` (returns `None` if `s1` is not invertible)
+2. `a = s2 * r1 * u - r2`
+3. `b = z2 - s2 * z1 * u`
+4. `c = s2`
+5. `a_inv = a.invert()` (returns `None` if `a` is not invertible)
+6. `alpha = -(c * a_inv)`
+7. `beta = b * a_inv`
 
-Because all operations are performed modulo `n`, the normalization step does
-not change the residue class, it only chooses the canonical representative in
-`[0, n)`.
+Because all operations are performed directly in the secp256k1 scalar field
+using the `k256::Scalar` type, every intermediate value is automatically
+reduced modulo `n`. The `Scalar` type guarantees that all values are valid
+field elements in `[0, n)`.
 
 The search then evaluates:
 
@@ -156,12 +157,12 @@ which is algebraically equivalent to the derived form above.
 
 ### Proof sketch
 
-The code computes canonical residues after every modular operation. Because
-canonicalization preserves residue classes modulo `n`, each intermediate value
-remains mathematically equivalent to the symbol used in the derivation. The
-only nontrivial precondition is invertibility of `s1` and `a` modulo `n`.
-When those inverses exist, the computed `alpha` and `beta` are uniquely
-defined, and the search evaluates the same affine function derived above.
+The code uses `k256::Scalar` for all arithmetic, which is a prime-field type
+that enforces reduction modulo `n` on every operation. Because the field is a
+prime field, every nonzero element has a unique multiplicative inverse. The only
+nontrivial precondition is invertibility of `s1` and `a` modulo `n`. When those
+inverses exist, the computed `alpha` and `beta` are uniquely defined, and the
+search evaluates the same affine function derived above.
 
 ## Failure condition
 
@@ -180,11 +181,19 @@ The search code treats `delta` as a bounded signed integer, but the math is
 still modulo `n`. A negative `delta` is just the additive inverse of its
 positive magnitude in the scalar field, so the same derivation applies.
 
+The implementation computes `d(delta)` for negative delta as:
+
+```text
+d = beta - alpha * |delta|   (mod n)
+```
+
+which is equivalent to `alpha * delta + beta` because `delta = -|delta|`.
+
 ## Complexity
 
-- **Derivation time:** dominated by two modular inversions over arbitrary
-  precision integers.
-- **Derivation space:** constant with respect to the input size, aside from
-  temporary big integers used during the modular arithmetic.
+- **Derivation time:** dominated by two scalar inversions (extended Euclidean
+  algorithm) and a handful of field multiplications/additions.
+- **Derivation space:** constant — only a few `Scalar` temporaries.
 - **Search mapping:** the derived equation is a single affine evaluation per
-  candidate delta, which matches the `O(N)` search loop in `src/main.rs`.
+  candidate delta, which matches the `O(N)` scan loop or `O(sqrt(N))` BSGS
+  loop in `src/main.rs`.
