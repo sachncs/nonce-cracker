@@ -10,6 +10,11 @@
 //!
 //! # Generate test data for the tool
 //! cargo run --example generate
+//!
+//! # Run a search with signatures
+//! cargo run -- run \
+//!   --r1 0x... --r2 0x... --s1 0x... --s2 0x... \
+//!   --z1 0x... --z2 0x... --pubkey 0x...
 //! ```
 //!
 //! ## Bundled demonstration
@@ -33,9 +38,8 @@ fn main() {
     println!("This binary demonstrates usage patterns.");
     println!();
     println!("To run the actual tool, use:");
-    println!("  cargo run -- example    # Run the built-in demonstration");
-    println!("  cargo run -- recover   # Use the recover command");
-    println!("  cargo run -- run       # Use the run command");
+    println!("  cargo run -- example  # Run the built-in demonstration");
+    println!("  cargo run -- run     # Run a search with signatures");
     println!();
     println!("See README.md for complete documentation.");
 }

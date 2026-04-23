@@ -33,6 +33,8 @@ nonce-cracker is a CPU-intensive application designed for high-performance ECDSA
 | Disk | 10 GB | 100+ GB (for large search ranges) |
 | Network | None required | N/A |
 
+For BSGS searches (ranges > 2^32 candidates), memory scales with `O(sqrt(N))` up to a maximum of ~5 GB at the BSGS memory guard (`BSGS_MAX_M = 2^26`).
+
 ### Software Requirements
 
 - Docker 24.0+ or containerd
@@ -55,10 +57,9 @@ docker run --rm \
   -e NONCE_CRACKER_LOG_LEVEL=debug \
   -e NONCE_CRACKER_MAX_THREADS=8 \
   -v $(pwd)/logs:/app/logs \
-  nonce-cracker:latest recover \
-  --r1 0x... --s1 0x... --z1 0x... \
-  --r2 0x... --s2 0x... --z2 0x... \
-  --pubkey 0x...
+  nonce-cracker:latest run \
+  --r1 0x... --r2 0x... --s1 0x... --s2 0x... \
+  --z1 0x... --z2 0x... --pubkey 0x...
 ```
 
 ### Production Dockerfile
@@ -107,7 +108,6 @@ metadata:
   namespace: nonce-cracker
 data:
   NONCE_CRACKER_LOG_LEVEL: "info"
-  NONCE_CRACKER_LOG_FORMAT: "json"
   NONCE_CRACKER_MAX_THREADS: "16"
   NONCE_CRACKER_LOG_CONSOLE: "false"
 ```
@@ -152,7 +152,7 @@ spec:
             memory: "4Gi"
             cpu: "4"
           limits:
-            memory: "16Gi"
+            memory: "32Gi"
             cpu: "16"
         volumeMounts:
         - name: logs
@@ -198,17 +198,17 @@ spec:
         image: nonce-cracker:latest
         command:
         - /app/nonce-cracker
-        - recover
+        - run
         - --r1
         - "$(R1)"
-        - --s1
-        - "$(S1)"
-        - --z1
-        - "$(Z1)"
         - --r2
         - "$(R2)"
+        - --s1
+        - "$(S1)"
         - --s2
         - "$(S2)"
+        - --z1
+        - "$(Z1)"
         - --z2
         - "$(Z2)"
         - --pubkey
@@ -252,7 +252,6 @@ spec:
 |----------|-------------|---------|---------|
 | `NONCE_CRACKER_LOG_DIR` | Log output directory | `logs` | `/var/log/nonce-cracker` |
 | `NONCE_CRACKER_LOG_LEVEL` | Log verbosity | `info` | `debug` |
-| `NONCE_CRACKER_LOG_FORMAT` | Output format | `compact` | `json` |
 | `NONCE_CRACKER_LOG_CONSOLE` | Enable console output | `true` | `false` |
 | `NONCE_CRACKER_MAX_THREADS` | Max worker threads | `256` | `16` |
 
@@ -274,20 +273,8 @@ kubectl create secret generic signature-data \
 
 The application emits structured metrics logs:
 
-```json
-{
-  "ts": "1234567890.123456789",
-  "level": "INFO",
-  "target": "nonce-cracker::metrics",
-  "message": "search completed",
-  "fields": {
-    "event": "search_complete",
-    "found": true,
-    "total_candidates": 1000000,
-    "elapsed_sec": "45.123",
-    "overall_rate_per_sec": "22147.89"
-  }
-}
+```
+2026-04-23T01:44:00.123456Z INFO nonce-cracker::metrics: event="search_complete" found=true delta=1 elapsed_sec=0.123 threads=8
 ```
 
 ### Health Checks
@@ -308,7 +295,7 @@ Recommended alerting rules:
     severity: warning
   annotations:
     summary: "High error rate in nonce-cracker"
-    
+
 - alert: NonceCrackerSearchStalled
   expr: |
     rate(nonce_cracker_candidates_evaluated_total[5m]) == 0
@@ -356,9 +343,10 @@ data:
 
 If the application is consuming too much memory:
 
-1. Check thread count: `NONCE_CRACKER_MAX_THREADS`
-2. Monitor with `kubectl top pod`
-3. Set memory limits in resources
+1. Check if BSGS is active (ranges > 2^32 use more memory). Reduce search range to force parallel scan.
+2. Check thread count: `NONCE_CRACKER_MAX_THREADS`
+3. Monitor with `kubectl top pod`
+4. Set memory limits in resources
 
 ### Slow Performance
 
@@ -370,7 +358,7 @@ If the application is consuming too much memory:
 
 1. Check `NONCE_CRACKER_LOG_DIR` permissions
 2. Verify volume mounts are correct
-3. Check `NONCECE_CRACKER_LOG_CONSOLE` setting
+3. Check `NONCE_CRACKER_LOG_CONSOLE` setting
 
 ### Graceful Shutdown Issues
 
@@ -382,7 +370,7 @@ If shutdown is not graceful:
 
 ## Best Practices
 
-1. **Resource Planning**: Calculate required CPU/RAM based on search range
+1. **Resource Planning**: Calculate required CPU/RAM based on search range. BSGS ranges need more memory.
 2. **Storage**: Use persistent volumes for long-running searches
 3. **Secrets**: Never commit secrets to version control
 4. **Monitoring**: Set up alerts for completion and errors
