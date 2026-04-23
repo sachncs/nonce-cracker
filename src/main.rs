@@ -33,7 +33,12 @@ fn shutdown() -> bool {
 }
 
 #[derive(Parser, Debug)]
-#[command(name = "nonce-cracker", author, version, about = "High-speed parallel ECDSA key search for secp256k1")]
+#[command(
+    name = "nonce-cracker",
+    author,
+    version,
+    about = "High-speed parallel ECDSA key search for secp256k1"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
@@ -43,19 +48,32 @@ struct Cli {
 enum Commands {
     #[command(name = "run")]
     Search {
-        #[arg(long)] r1: String,
-        #[arg(long)] r2: String,
-        #[arg(long)] s1: String,
-        #[arg(long)] s2: String,
-        #[arg(long)] z1: String,
-        #[arg(long)] z2: String,
-        #[arg(long)] pubkey: String,
-        #[arg(long, default_value = "0", allow_hyphen_values = true)] start: String,
-        #[arg(long, default_value = "0x1000000000000000", allow_hyphen_values = true)] end: String,
-        #[arg(long, default_value = "1", allow_hyphen_values = true)] step: String,
-        #[arg(long)] threads: Option<usize>,
-        #[arg(long, default_value = "false")] quiet: bool,
-        #[arg(long, default_value = "search.log")] outfile: String,
+        #[arg(long)]
+        r1: String,
+        #[arg(long)]
+        r2: String,
+        #[arg(long)]
+        s1: String,
+        #[arg(long)]
+        s2: String,
+        #[arg(long)]
+        z1: String,
+        #[arg(long)]
+        z2: String,
+        #[arg(long)]
+        pubkey: String,
+        #[arg(long, default_value = "0", allow_hyphen_values = true)]
+        start: String,
+        #[arg(long, default_value = "0x1000000000000000", allow_hyphen_values = true)]
+        end: String,
+        #[arg(long, default_value = "1", allow_hyphen_values = true)]
+        step: String,
+        #[arg(long)]
+        threads: Option<usize>,
+        #[arg(long, default_value = "false")]
+        quiet: bool,
+        #[arg(long, default_value = "search.log")]
+        outfile: String,
     },
     #[command(name = "example")]
     Example,
@@ -130,14 +148,28 @@ fn main() {
             error!("example failed: {e}");
             1
         }),
-        Commands::Search { r1, r2, s1, s2, z1, z2, pubkey, start, end, step, threads, quiet, outfile } => {
-            run_search(r1, r2, s1, s2, z1, z2, pubkey, start, end, step, threads, quiet, outfile)
-                .map(|_| 0)
-                .unwrap_or_else(|e| {
-                    error!("search failed: {e}");
-                    1
-                })
-        }
+        Commands::Search {
+            r1,
+            r2,
+            s1,
+            s2,
+            z1,
+            z2,
+            pubkey,
+            start,
+            end,
+            step,
+            threads,
+            quiet,
+            outfile,
+        } => run_search(
+            r1, r2, s1, s2, z1, z2, pubkey, start, end, step, threads, quiet, outfile,
+        )
+        .map(|_| 0)
+        .unwrap_or_else(|e| {
+            error!("search failed: {e}");
+            1
+        }),
     };
 
     info!("shutting down");
@@ -145,9 +177,19 @@ fn main() {
 }
 
 fn run_search(
-    r1: String, r2: String, s1: String, s2: String, z1: String, z2: String,
-    pubkey: String, start: String, end: String, step: String,
-    threads: Option<usize>, quiet: bool, outfile: String,
+    r1: String,
+    r2: String,
+    s1: String,
+    s2: String,
+    z1: String,
+    z2: String,
+    pubkey: String,
+    start: String,
+    end: String,
+    step: String,
+    threads: Option<usize>,
+    quiet: bool,
+    outfile: String,
 ) -> Result<()> {
     let r1 = parse_scalar(&r1)?;
     let r2 = parse_scalar(&r2)?;
@@ -162,7 +204,9 @@ fn run_search(
     if step == 0 {
         return Err(Error("step must be > 0".into()));
     }
-    search(r1, r2, s1, s2, z1, z2, pk, start, end, step, threads, quiet, &outfile)
+    search(
+        r1, r2, s1, s2, z1, z2, pk, start, end, step, threads, quiet, &outfile,
+    )
 }
 
 fn run_example() -> Result<()> {
@@ -173,14 +217,38 @@ fn run_example() -> Result<()> {
     let s2 = parse_scalar("0x31bc5dd7d522300c1a3fa117322581571329a2af3ba0d1a9b72d3c36eeac3ec7")?;
     let z2 = parse_scalar("0x0000000000000000000000000000000000000000000000000000000000000002")?;
     let pk = parse_pubkey("03f01d6b9018ab421dd410404cb869072065522bf85734008f105cf385a023a80f")?;
-    search(r1, r2, s1, s2, z1, z2, pk, 0, 2, 1, None, false, "example.log")
+    search(
+        r1,
+        r2,
+        s1,
+        s2,
+        z1,
+        z2,
+        pk,
+        0,
+        2,
+        1,
+        None,
+        false,
+        "example.log",
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
 fn search(
-    r1: Scalar, r2: Scalar, s1: Scalar, s2: Scalar, z1: Scalar, z2: Scalar,
-    target: PublicKey, start: i64, end: i64, step: i64,
-    threads: Option<usize>, quiet: bool, outfile: &str,
+    r1: Scalar,
+    r2: Scalar,
+    s1: Scalar,
+    s2: Scalar,
+    z1: Scalar,
+    z2: Scalar,
+    target: PublicKey,
+    start: i64,
+    end: i64,
+    step: i64,
+    threads: Option<usize>,
+    quiet: bool,
+    outfile: &str,
 ) -> Result<()> {
     if end < start {
         return Err(Error("end must be >= start".into()));
@@ -222,11 +290,13 @@ fn search(
     let step_point = ProjectivePoint::GENERATOR * step_scalar;
     let target_affine: AffinePoint = *target.as_affine();
 
-    let span = (end as i128).checked_sub(start as i128)
+    let span = (end as i128)
+        .checked_sub(start as i128)
         .ok_or_else(|| Error("range overflow".into()))?;
     let step_i128 = step as i128;
     let total: u128 = (span / step_i128 + 1)
-        .try_into().map_err(|_| Error("range too large".into()))?;
+        .try_into()
+        .map_err(|_| Error("range too large".into()))?;
 
     if step_scalar == Scalar::from(0u64) {
         let d0 = derive_private_key(start, alpha, beta);
@@ -234,21 +304,60 @@ fn search(
         if point == target_affine {
             let hex = scalar_hex(&d0);
             writeln!(log, "FOUND delta={start} d=0x{hex}")?;
-            logging::emit_summary(Level::INFO, format!("event=search_result status=found delta={start} d=0x{hex} report={}", out.display()), !quiet);
+            logging::emit_summary(
+                Level::INFO,
+                format!(
+                    "event=search_result status=found delta={start} d=0x{hex} report={}",
+                    out.display()
+                ),
+                !quiet,
+            );
         } else {
             writeln!(log, "No key found in searched range.")?;
-            logging::emit_summary(Level::WARN, format!("event=search_result status=missing report={}", out.display()), !quiet);
+            logging::emit_summary(
+                Level::WARN,
+                format!(
+                    "event=search_result status=missing report={}",
+                    out.display()
+                ),
+                !quiet,
+            );
         }
         return Ok(());
     }
 
-    info!(search_start = start, search_end = end, step = step, threads = thread_count, total = total, "starting search");
+    info!(
+        search_start = start,
+        search_end = end,
+        step = step,
+        threads = thread_count,
+        total = total,
+        "starting search"
+    );
     let m = metrics::search_started(thread_count);
 
     let found = if total <= BSGS_THRESHOLD {
-        parallel_scan(target, start, step, total, thread_count, alpha, beta, step_point)?
+        parallel_scan(
+            target,
+            start,
+            step,
+            total,
+            thread_count,
+            alpha,
+            beta,
+            step_point,
+        )?
     } else {
-        bsgs(target, start, step, total, thread_count, alpha, beta, step_point)?
+        bsgs(
+            target,
+            start,
+            step,
+            total,
+            thread_count,
+            alpha,
+            beta,
+            step_point,
+        )?
     };
 
     if let Some(found_delta) = found {
@@ -256,11 +365,25 @@ fn search(
         let hex = scalar_hex(&d);
         writeln!(log, "FOUND delta={found_delta} d=0x{hex}")?;
         metrics::search_completed(&m, true, Some(found_delta));
-        logging::emit_summary(Level::INFO, format!("event=search_result status=found delta={found_delta} d=0x{hex} report={}", out.display()), !quiet);
+        logging::emit_summary(
+            Level::INFO,
+            format!(
+                "event=search_result status=found delta={found_delta} d=0x{hex} report={}",
+                out.display()
+            ),
+            !quiet,
+        );
     } else {
         writeln!(log, "No key found in searched range.")?;
         metrics::search_completed(&m, false, None);
-        logging::emit_summary(Level::WARN, format!("event=search_result status=missing report={}", out.display()), !quiet);
+        logging::emit_summary(
+            Level::WARN,
+            format!(
+                "event=search_result status=missing report={}",
+                out.display()
+            ),
+            !quiet,
+        );
     }
 
     Ok(())
@@ -315,7 +438,12 @@ fn parallel_scan(
                 let mut found = false;
                 for _ in i..batch_end {
                     if point == target_affine {
-                        let _ = result.compare_exchange(NOT_FOUND, d0, Ordering::SeqCst, Ordering::Relaxed);
+                        let _ = result.compare_exchange(
+                            NOT_FOUND,
+                            d0,
+                            Ordering::SeqCst,
+                            Ordering::Relaxed,
+                        );
                         found = true;
                         break;
                     }
@@ -415,7 +543,8 @@ fn bsgs(
                     break;
                 }
                 let batch_end = (i + BATCH).min(chunk_end_u64);
-                let mut entries: Vec<(u64, ProjectivePoint)> = Vec::with_capacity((batch_end - i) as usize);
+                let mut entries: Vec<(u64, ProjectivePoint)> =
+                    Vec::with_capacity((batch_end - i) as usize);
                 let mut current = giant;
                 for idx in 0..(batch_end - i) {
                     if current == ProjectivePoint::IDENTITY {
@@ -440,7 +569,8 @@ fn bsgs(
 
                 if !entries.is_empty() {
                     let points: Vec<ProjectivePoint> = entries.iter().map(|(_, p)| *p).collect();
-                    let affines: Vec<AffinePoint> = ProjectivePoint::batch_normalize(points.as_slice());
+                    let affines: Vec<AffinePoint> =
+                        ProjectivePoint::batch_normalize(points.as_slice());
                     for (affine_idx, affine) in affines.iter().enumerate() {
                         let idx = entries[affine_idx].0;
                         let key = affine_key(affine);
@@ -475,7 +605,11 @@ fn bsgs(
     }
 }
 
-fn build_baby_steps(m: u64, step_point: ProjectivePoint, thread_count: usize) -> HashMap<[u8; 33], u64> {
+fn build_baby_steps(
+    m: u64,
+    step_point: ProjectivePoint,
+    thread_count: usize,
+) -> HashMap<[u8; 33], u64> {
     let maps: Vec<HashMap<[u8; 33], u64>> = (0..thread_count)
         .into_par_iter()
         .map(|tid| {
@@ -536,15 +670,27 @@ fn affine_key(affine: &AffinePoint) -> [u8; 33] {
 #[inline(always)]
 fn derive_private_key(delta: i64, alpha: Scalar, beta: Scalar) -> Scalar {
     let s = Scalar::from(delta.unsigned_abs());
-    if delta < 0 { beta - alpha * s } else { alpha * s + beta }
+    if delta < 0 {
+        beta - alpha * s
+    } else {
+        alpha * s + beta
+    }
 }
 
-fn derive_affine_constants(r1: Scalar, r2: Scalar, s1: Scalar, s2: Scalar, z1: Scalar, z2: Scalar) -> Result<(Scalar, Scalar)> {
+fn derive_affine_constants(
+    r1: Scalar,
+    r2: Scalar,
+    s1: Scalar,
+    s2: Scalar,
+    z1: Scalar,
+    z2: Scalar,
+) -> Result<(Scalar, Scalar)> {
     let u: Scalar = Option::from(s1.invert()).ok_or_else(|| Error("s1 not invertible".into()))?;
     let a: Scalar = s2 * r1 * u - r2;
     let b: Scalar = z2 - s2 * z1 * u;
     let c: Scalar = s2;
-    let a_inv: Scalar = Option::from(a.invert()).ok_or_else(|| Error("denominator not invertible".into()))?;
+    let a_inv: Scalar =
+        Option::from(a.invert()).ok_or_else(|| Error("denominator not invertible".into()))?;
     Ok((-(c * a_inv), b * a_inv))
 }
 
@@ -553,7 +699,11 @@ fn parse_scalar(s: &str) -> Result<Scalar> {
     if raw.is_empty() {
         return Err(Error("empty hex string".into()));
     }
-    let padded = if raw.len() % 2 == 1 { format!("0{raw}") } else { raw.to_string() };
+    let padded = if raw.len() % 2 == 1 {
+        format!("0{raw}")
+    } else {
+        raw.to_string()
+    };
     let bytes = Vec::from_hex(&padded)?;
     if bytes.len() > 32 {
         return Err(Error("scalar exceeds 32 bytes".into()));
@@ -578,14 +728,19 @@ fn parse_pubkey(s: &str) -> Result<PublicKey> {
 
 fn parse_int(s: &str) -> Result<i64> {
     let s = s.trim();
-    let (neg, body) = if let Some(r) = s.strip_prefix('-') { (true, r) }
-        else if let Some(r) = s.strip_prefix('+') { (false, r) }
-        else { (false, s) };
+    let (neg, body) = if let Some(r) = s.strip_prefix('-') {
+        (true, r)
+    } else if let Some(r) = s.strip_prefix('+') {
+        (false, r)
+    } else {
+        (false, s)
+    };
 
     let mag = if body.starts_with("0x") || body.starts_with("0X") {
         u128::from_str_radix(&body[2..], 16).map_err(|e| Error(format!("parse error: {e}")))?
     } else {
-        body.parse::<u128>().map_err(|e| Error(format!("parse error: {e}")))?
+        body.parse::<u128>()
+            .map_err(|e| Error(format!("parse error: {e}")))?
     };
 
     if neg {
@@ -608,7 +763,10 @@ fn resolve_path(p: &str) -> Result<PathBuf> {
         return Ok(path.to_path_buf());
     }
     if p == "search.log" {
-        let nanos = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
         return Ok(logging::log_dir().join(format!("search_{nanos}_{}.log", std::process::id())));
     }
     Ok(logging::log_dir().join(path))
@@ -631,9 +789,14 @@ mod tests {
     #[test]
     fn test_precompute_and_private_key() {
         let (a, b) = derive_affine_constants(
-            Scalar::from(1u64), Scalar::from(2u64), Scalar::from(3u64),
-            Scalar::from(4u64), Scalar::from(5u64), Scalar::from(6u64),
-        ).unwrap();
+            Scalar::from(1u64),
+            Scalar::from(2u64),
+            Scalar::from(3u64),
+            Scalar::from(4u64),
+            Scalar::from(5u64),
+            Scalar::from(6u64),
+        )
+        .unwrap();
         assert_eq!(derive_private_key(0, a, b), b);
     }
 
@@ -647,7 +810,10 @@ mod tests {
     #[test]
     fn test_hex_parsing() {
         assert_eq!(parse_scalar("0xFF").unwrap(), parse_scalar("FF").unwrap());
-        assert_eq!(parse_scalar("0xFFF").unwrap(), parse_scalar("0x0FFF").unwrap());
+        assert_eq!(
+            parse_scalar("0xFFF").unwrap(),
+            parse_scalar("0x0FFF").unwrap()
+        );
     }
 
     #[test]
@@ -675,7 +841,8 @@ mod tests {
 
     #[test]
     fn test_match() {
-        let pk = parse_pubkey("03f01d6b9018ab421dd410404cb869072065522bf85734008f105cf385a023a80f").unwrap();
+        let pk = parse_pubkey("03f01d6b9018ab421dd410404cb869072065522bf85734008f105cf385a023a80f")
+            .unwrap();
         let target: AffinePoint = *pk.as_affine();
         let matching = ProjectivePoint::GENERATOR * Scalar::from(0x3039u64);
         let wrong = ProjectivePoint::GENERATOR * Scalar::from(1u64);
@@ -689,17 +856,29 @@ mod tests {
         assert!(parse_pubkey("0xgg").is_err());
         assert!(parse_pubkey("01").is_err());
         assert!(parse_pubkey(&("02".to_string() + &"ff".repeat(31))).is_err());
-        assert!(parse_pubkey("0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798").is_ok());
-        let uncompressed = concat!("04", "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798", "483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8");
+        assert!(
+            parse_pubkey("0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798")
+                .is_ok()
+        );
+        let uncompressed = concat!(
+            "04",
+            "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+            "483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8"
+        );
         assert!(parse_pubkey(uncompressed).is_ok());
     }
 
     #[test]
     fn test_edge_cases() {
         assert!(derive_affine_constants(
-            Scalar::from(1u64), Scalar::from(2u64), Scalar::from(1u64),
-            Scalar::from(1u64), Scalar::from(0u64), Scalar::from(0u64),
-        ).is_ok());
+            Scalar::from(1u64),
+            Scalar::from(2u64),
+            Scalar::from(1u64),
+            Scalar::from(1u64),
+            Scalar::from(0u64),
+            Scalar::from(0u64),
+        )
+        .is_ok());
     }
 
     #[test]
@@ -727,7 +906,9 @@ mod tests {
         let (r1, r2, s1, s2, z1, z2, pk) = fixture();
         let out = temp_log("neg_delta_miss");
         search(r1, r2, s1, s2, z1, z2, pk, 0, 0, 1, None, true, &out).unwrap();
-        assert!(std::fs::read_to_string(&out).unwrap().contains("No key found"));
+        assert!(std::fs::read_to_string(&out)
+            .unwrap()
+            .contains("No key found"));
         let _ = std::fs::remove_file(&out);
     }
 
@@ -752,14 +933,20 @@ mod tests {
         let s2 = sig_s(2, r2, d, next);
 
         let pk = PublicKey::from_sec1_bytes(
-            (ProjectivePoint::GENERATOR * d).to_affine().to_encoded_point(true).as_bytes(),
-        ).unwrap();
+            (ProjectivePoint::GENERATOR * d)
+                .to_affine()
+                .to_encoded_point(true)
+                .as_bytes(),
+        )
+        .unwrap();
 
         (r1, r2, s1, s2, z1, z2, pk)
     }
 
     fn r_from_nonce(n: u64) -> Scalar {
-        let enc = (ProjectivePoint::GENERATOR * Scalar::from(n)).to_affine().to_encoded_point(true);
+        let enc = (ProjectivePoint::GENERATOR * Scalar::from(n))
+            .to_affine()
+            .to_encoded_point(true);
         let mut b = [0u8; 32];
         b.copy_from_slice(&enc.as_bytes()[1..33]);
         Scalar::from_repr(b.into()).unwrap()
@@ -770,8 +957,13 @@ mod tests {
     }
 
     fn temp_log(prefix: &str) -> String {
-        let nanos = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
-        std::env::temp_dir().join(format!("{prefix}_{}_{}.log", std::process::id(), nanos))
-            .to_string_lossy().into_owned()
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        std::env::temp_dir()
+            .join(format!("{prefix}_{}_{}.log", std::process::id(), nanos))
+            .to_string_lossy()
+            .into_owned()
     }
 }
