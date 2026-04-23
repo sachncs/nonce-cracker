@@ -1,5 +1,7 @@
 use std::{
-    fmt, fs::File, io::{self, Write},
+    fmt,
+    fs::File,
+    io::{self, Write},
     path::PathBuf,
     sync::OnceLock,
 };
@@ -38,12 +40,13 @@ pub fn init() -> Result<(), LoggingError> {
         .map(|v| v == "1" || v == "true")
         .unwrap_or(true);
 
-    let env_filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new(level.to_string()));
+    let env_filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(level.to_string()));
 
     let log_path = dir.join(DEFAULT_LOG_FILE);
     let file = File::options()
-        .create(true).append(true)
+        .create(true)
+        .append(true)
         .open(&log_path)
         .map_err(|e| LoggingError::Logger(e.to_string()))?;
 
@@ -68,7 +71,10 @@ pub fn init() -> Result<(), LoggingError> {
 }
 
 pub fn log_dir() -> PathBuf {
-    LOG_DIR.get().cloned().unwrap_or_else(|| crate::config::Config::get().log_dir.clone())
+    LOG_DIR
+        .get()
+        .cloned()
+        .unwrap_or_else(|| crate::config::Config::get().log_dir.clone())
 }
 
 pub fn emit_summary(level: Level, message: impl fmt::Display, console: bool) {

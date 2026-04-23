@@ -49,14 +49,18 @@ impl Config {
     }
 
     pub fn init() -> Result<(), ConfigError> {
-        CONFIG.set(Self::load()?).map_err(|_| ConfigError("already initialized".into()))?;
+        CONFIG
+            .set(Self::load()?)
+            .map_err(|_| ConfigError("already initialized".into()))?;
         Ok(())
     }
 }
 
 fn parse_env_usize(name: &str, default: usize) -> Result<usize, ConfigError> {
     match env::var(name) {
-        Ok(v) => v.parse().map_err(|e| ConfigError(format!("{name}={v}: {e}"))),
+        Ok(v) => v
+            .parse()
+            .map_err(|e| ConfigError(format!("{name}={v}: {e}"))),
         Err(env::VarError::NotPresent) => Ok(default),
         Err(_) => Err(ConfigError(format!("{name}: invalid unicode"))),
     }

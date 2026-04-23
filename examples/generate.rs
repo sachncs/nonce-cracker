@@ -75,11 +75,20 @@ fn main() {
 
     println!("\n// === Rust code for src/main.rs ===");
     println!("let r1 = parse_scalar_hex(\"0x{}\")?;", hex::encode(r1_arr));
-    println!("let s1 = parse_scalar_hex(\"0x{}\")?;", hex::encode(s1_scalar.to_bytes()));
+    println!(
+        "let s1 = parse_scalar_hex(\"0x{}\")?;",
+        hex::encode(s1_scalar.to_bytes())
+    );
     println!("let z1 = parse_scalar_hex(\"0x0000000000000000000000000000000000000000000000000000000000000001\")?;");
     println!("let r2 = parse_scalar_hex(\"0x{}\")?;", hex::encode(r2_arr));
-    println!("let s2 = parse_scalar_hex(\"0x{}\")?;", hex::encode(s2_scalar.to_bytes()));
+    println!(
+        "let s2 = parse_scalar_hex(\"0x{}\")?;",
+        hex::encode(s2_scalar.to_bytes())
+    );
     println!("let z2 = parse_scalar_hex(\"0x0000000000000000000000000000000000000000000000000000000000000002\")?;");
     println!("let pk = parse_public_key(\"{}\")?;", pk_hex);
-    println!("search(r1, r2, s1, s2, z1, z2, pk, 0, {}, 1, None, false, \"example.log\")?", delta + 1);
+    println!(
+        "search(r1, r2, s1, s2, z1, z2, pk, 0, {}, 1, None, false, \"example.log\")?",
+        delta + 1
+    );
 }

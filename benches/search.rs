@@ -1,8 +1,5 @@
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
-use k256::{
-    elliptic_curve::PrimeField,
-    ProjectivePoint, Scalar,
-};
+use k256::{elliptic_curve::PrimeField, ProjectivePoint, Scalar};
 
 fn derive_affine_constants(
     r1: Scalar,
@@ -67,7 +64,8 @@ fn parse_scalar_hex(s: &str) -> Scalar {
 }
 
 fn bench_scalar_operations(c: &mut Criterion) {
-    let alpha = parse_scalar_hex("a7fa8b4a2944338eee5180dbee8e763334c9c09c5f6450c8e08150714e3bd81b");
+    let alpha =
+        parse_scalar_hex("a7fa8b4a2944338eee5180dbee8e763334c9c09c5f6450c8e08150714e3bd81b");
     let beta = parse_scalar_hex("585e5a8c07383473109d225e68d210b5bc791f870357bf1c61fb5dbf6578740e");
 
     c.bench_function("derive_private_key", |b| {
@@ -87,8 +85,12 @@ fn bench_search_chunk(c: &mut Criterion) {
 
     for size in [1000u64, 10000, 100000].iter() {
         group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, &size| {
-            let alpha = parse_scalar_hex("a7fa8b4a2944338eee5180dbee8e763334c9c09c5f6450c8e08150714e3bd81b");
-            let beta = parse_scalar_hex("585e5a8c07383473109d225e68d210b5bc791f870357bf1c61fb5dbf6578740e");
+            let alpha = parse_scalar_hex(
+                "a7fa8b4a2944338eee5180dbee8e763334c9c09c5f6450c8e08150714e3bd81b",
+            );
+            let beta = parse_scalar_hex(
+                "585e5a8c07383473109d225e68d210b5bc791f870357bf1c61fb5dbf6578740e",
+            );
             let step_scalar = alpha * Scalar::from(1u64);
             let step_point = ProjectivePoint::GENERATOR * step_scalar;
 
