@@ -2,7 +2,7 @@ use crate::crypto::{
     derive_affine_constants, derive_private_key, parse_int, parse_pubkey, parse_scalar, scalar_hex,
 };
 use crate::search::{bsgs, parallel_scan, set_shutdown, BSGS_THRESHOLD};
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 use k256::{AffinePoint, ProjectivePoint, PublicKey, Scalar};
 use std::{
     fs::File,
@@ -63,37 +63,40 @@ struct Cli {
     command: Option<Commands>,
 }
 
+#[derive(Args, Debug)]
+struct SearchArgs {
+    #[arg(long)]
+    r1: String,
+    #[arg(long)]
+    r2: String,
+    #[arg(long)]
+    s1: String,
+    #[arg(long)]
+    s2: String,
+    #[arg(long)]
+    z1: String,
+    #[arg(long)]
+    z2: String,
+    #[arg(long)]
+    pubkey: String,
+    #[arg(long, default_value = "0", allow_hyphen_values = true)]
+    start: String,
+    #[arg(long, default_value = "0x1000000000000000", allow_hyphen_values = true)]
+    end: String,
+    #[arg(long, default_value = "1", allow_hyphen_values = true)]
+    step: String,
+    #[arg(long)]
+    threads: Option<usize>,
+    #[arg(long, default_value = "false")]
+    quiet: bool,
+    #[arg(long, default_value = "search.log")]
+    outfile: String,
+}
+
 #[derive(Subcommand, Debug)]
 enum Commands {
     #[command(name = "run")]
-    Search {
-        #[arg(long)]
-        r1: String,
-        #[arg(long)]
-        r2: String,
-        #[arg(long)]
-        s1: String,
-        #[arg(long)]
-        s2: String,
-        #[arg(long)]
-        z1: String,
-        #[arg(long)]
-        z2: String,
-        #[arg(long)]
-        pubkey: String,
-        #[arg(long, default_value = "0", allow_hyphen_values = true)]
-        start: String,
-        #[arg(long, default_value = "0x1000000000000000", allow_hyphen_values = true)]
-        end: String,
-        #[arg(long, default_value = "1", allow_hyphen_values = true)]
-        step: String,
-        #[arg(long)]
-        threads: Option<usize>,
-        #[arg(long, default_value = "false")]
-        quiet: bool,
-        #[arg(long, default_value = "search.log")]
-        outfile: String,
-    },
+    Search(Box<SearchArgs>),
     #[command(name = "example")]
     Example,
 }
@@ -130,69 +133,43 @@ fn main() {
 
     let cli = Cli::parse();
     let code = match cli.command.unwrap_or(Commands::Example) {
-        Commands::Example => run_example().map(|_| 0).unwrap_or_else(|e| {
-            error!("example failed: {e}");
-            1
-        }),
-        Commands::Search {
-            r1,
-            r2,
-            s1,
-            s2,
-            z1,
-            z2,
-            pubkey,
-            start,
-            end,
-            step,
-            threads,
-            quiet,
-            outfile,
-        } => run_search(
-            r1, r2, s1, s2, z1, z2, pubkey, start, end, step, threads, quiet, outfile,
-        )
-        .map(|_| 0)
-        .unwrap_or_else(|e| {
-            error!("search failed: {e}");
-            1
-        }),
+        Commands::Example => run_example().map_or_else(
+            |e| {
+                error!("example failed: {e}");
+                1
+            },
+            |()| 0,
+        ),
+        Commands::Search(args) => run_search(*args).map_or_else(
+            |e| {
+                error!("search failed: {e}");
+                1
+            },
+            |()| 0,
+        ),
     };
 
     info!("shutting down");
     std::process::exit(code);
 }
 
-fn run_search(
-    r1: String,
-    r2: String,
-    s1: String,
-    s2: String,
-    z1: String,
-    z2: String,
-    pubkey: String,
-    start: String,
-    end: String,
-    step: String,
-    threads: Option<usize>,
-    quiet: bool,
-    outfile: String,
-) -> Result<()> {
-    let r1 = parse_scalar(&r1)?;
-    let r2 = parse_scalar(&r2)?;
-    let s1 = parse_scalar(&s1)?;
-    let s2 = parse_scalar(&s2)?;
-    let z1 = parse_scalar(&z1)?;
-    let z2 = parse_scalar(&z2)?;
-    let pk = parse_pubkey(&pubkey)?;
-    let start = parse_int(&start)?;
-    let end = parse_int(&end)?;
-    let step = parse_int(&step)?;
-    if step == 0 {
-        return Err(Error("step must be > 0".into()));
-    }
-    search(
-        r1, r2, s1, s2, z1, z2, pk, start, end, step, threads, quiet, &outfile,
-    )
+fn run_search(args: SearchArgs) -> Result<()> {
+    let params = SearchParams {
+        r1: parse_scalar(&args.r1)?,
+        r2: parse_scalar(&args.r2)?,
+        s1: parse_scalar(&args.s1)?,
+        s2: parse_scalar(&args.s2)?,
+        z1: parse_scalar(&args.z1)?,
+        z2: parse_scalar(&args.z2)?,
+        target: parse_pubkey(&args.pubkey)?,
+        start: parse_int(&args.start)?,
+        end: parse_int(&args.end)?,
+        step: parse_int(&args.step)?,
+        threads: args.threads,
+        quiet: args.quiet,
+        outfile: args.outfile,
+    };
+    search(&params)
 }
 
 fn run_example() -> Result<()> {
@@ -203,25 +180,25 @@ fn run_example() -> Result<()> {
     let s2 = parse_scalar("0x31bc5dd7d522300c1a3fa117322581571329a2af3ba0d1a9b72d3c36eeac3ec7")?;
     let z2 = parse_scalar("0x0000000000000000000000000000000000000000000000000000000000000002")?;
     let pk = parse_pubkey("03f01d6b9018ab421dd410404cb869072065522bf85734008f105cf385a023a80f")?;
-    search(
+    let params = SearchParams {
         r1,
         r2,
         s1,
         s2,
         z1,
         z2,
-        pk,
-        0,
-        2,
-        1,
-        None,
-        false,
-        "example.log",
-    )
+        target: pk,
+        start: 0,
+        end: 2,
+        step: 1,
+        threads: None,
+        quiet: false,
+        outfile: "example.log".into(),
+    };
+    search(&params)
 }
 
-#[allow(clippy::too_many_arguments)]
-fn search(
+struct SearchParams {
     r1: Scalar,
     r2: Scalar,
     s1: Scalar,
@@ -234,23 +211,25 @@ fn search(
     step: i64,
     threads: Option<usize>,
     quiet: bool,
-    outfile: &str,
-) -> Result<()> {
-    if end < start {
+    outfile: String,
+}
+
+fn search(params: &SearchParams) -> Result<()> {
+    if params.end < params.start {
         return Err(Error("end must be >= start".into()));
     }
-    if matches!(threads, Some(0)) {
+    if matches!(params.threads, Some(0)) {
         return Err(Error("threads must be > 0".into()));
     }
-    if outfile.trim().is_empty() {
+    if params.outfile.trim().is_empty() {
         return Err(Error("outfile must not be empty".into()));
     }
-    if step <= 0 {
+    if params.step <= 0 {
         return Err(Error("step must be > 0".into()));
     }
 
     let max_threads = config::Config::get().max_threads;
-    let thread_count = match threads {
+    let thread_count = match params.threads {
         Some(t) if t > max_threads => {
             warn!(requested = t, max = max_threads, "capping threads");
             max_threads
@@ -262,9 +241,11 @@ fn search(
             .min(max_threads),
     };
 
-    let (alpha, beta) = derive_affine_constants(r1, r2, s1, s2, z1, z2)?;
+    let (alpha, beta) = derive_affine_constants(
+        params.r1, params.r2, params.s1, params.s2, params.z1, params.z2,
+    )?;
 
-    let out = resolve_path(outfile)?;
+    let out = resolve_path(&params.outfile)?;
     if let Some(parent) = out.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -272,31 +253,32 @@ fn search(
     writeln!(log, "alpha: 0x{}", scalar_hex(&alpha))?;
     writeln!(log, "beta:  0x{}", scalar_hex(&beta))?;
 
-    let step_scalar = alpha * Scalar::from(step.unsigned_abs());
+    let step_scalar = alpha * Scalar::from(params.step.unsigned_abs());
     let step_point = ProjectivePoint::GENERATOR * step_scalar;
-    let target_affine: AffinePoint = *target.as_affine();
+    let target_affine: AffinePoint = *params.target.as_affine();
 
-    let span = (end as i128)
-        .checked_sub(start as i128)
+    let span = i128::from(params.end)
+        .checked_sub(i128::from(params.start))
         .ok_or_else(|| Error("range overflow".into()))?;
-    let step_i128 = step as i128;
+    let step_i128 = i128::from(params.step);
     let total: u128 = (span / step_i128 + 1)
         .try_into()
         .map_err(|_| Error("range too large".into()))?;
 
     if step_scalar == Scalar::from(0u64) {
-        let d0 = derive_private_key(start, alpha, beta);
+        let d0 = derive_private_key(params.start, alpha, beta);
         let point = ProjectivePoint::GENERATOR * d0;
         if point == target_affine {
             let hex = scalar_hex(&d0);
-            writeln!(log, "FOUND delta={start} d=0x{hex}")?;
+            writeln!(log, "FOUND delta={} d=0x{hex}", params.start)?;
             logging::emit_summary(
                 Level::INFO,
                 format!(
-                    "event=search_result status=found delta={start} d=0x{hex} report={}",
+                    "event=search_result status=found delta={} d=0x{hex} report={}",
+                    params.start,
                     out.display()
                 ),
-                !quiet,
+                !params.quiet,
             );
         } else {
             writeln!(log, "No key found in searched range.")?;
@@ -306,44 +288,36 @@ fn search(
                     "event=search_result status=missing report={}",
                     out.display()
                 ),
-                !quiet,
+                !params.quiet,
             );
         }
         return Ok(());
     }
 
     info!(
-        search_start = start,
-        search_end = end,
-        step = step,
+        search_start = params.start,
+        search_end = params.end,
+        step = params.step,
         threads = thread_count,
         total = total,
         "starting search"
     );
     let m = metrics::search_started(thread_count);
 
+    let scan_params = search::ScanParams {
+        target: params.target,
+        start: params.start,
+        step: params.step,
+        total,
+        thread_count,
+        alpha,
+        beta,
+        step_point,
+    };
     let found = if total <= BSGS_THRESHOLD {
-        parallel_scan(
-            target,
-            start,
-            step,
-            total,
-            thread_count,
-            alpha,
-            beta,
-            step_point,
-        )?
+        parallel_scan(&scan_params)?
     } else {
-        bsgs(
-            target,
-            start,
-            step,
-            total,
-            thread_count,
-            alpha,
-            beta,
-            step_point,
-        )?
+        bsgs(&scan_params)?
     };
 
     if let Some(found_delta) = found {
@@ -357,7 +331,7 @@ fn search(
                 "event=search_result status=found delta={found_delta} d=0x{hex} report={}",
                 out.display()
             ),
-            !quiet,
+            !params.quiet,
         );
     } else {
         writeln!(log, "No key found in searched range.")?;
@@ -368,7 +342,7 @@ fn search(
                 "event=search_result status=missing report={}",
                 out.display()
             ),
-            !quiet,
+            !params.quiet,
         );
     }
 
@@ -423,7 +397,22 @@ mod tests {
     fn test_search_negative_delta() {
         let (r1, r2, s1, s2, z1, z2, pk) = fixture();
         let out = temp_log("neg_delta_found");
-        search(r1, r2, s1, s2, z1, z2, pk, -2, 0, 1, None, true, &out).unwrap();
+        let params = SearchParams {
+            r1,
+            r2,
+            s1,
+            s2,
+            z1,
+            z2,
+            target: pk,
+            start: -2,
+            end: 0,
+            step: 1,
+            threads: None,
+            quiet: true,
+            outfile: out.clone(),
+        };
+        search(&params).unwrap();
         let log = std::fs::read_to_string(&out).unwrap();
         assert!(log.contains("FOUND delta=-1"));
         assert!(log.contains(&format!("d=0x{}", scalar_hex(&Scalar::from(0x3039u64)))));
@@ -434,7 +423,22 @@ mod tests {
     fn test_search_no_match() {
         let (r1, r2, s1, s2, z1, z2, pk) = fixture();
         let out = temp_log("neg_delta_miss");
-        search(r1, r2, s1, s2, z1, z2, pk, 0, 0, 1, None, true, &out).unwrap();
+        let params = SearchParams {
+            r1,
+            r2,
+            s1,
+            s2,
+            z1,
+            z2,
+            target: pk,
+            start: 0,
+            end: 0,
+            step: 1,
+            threads: None,
+            quiet: true,
+            outfile: out.clone(),
+        };
+        search(&params).unwrap();
         assert!(std::fs::read_to_string(&out)
             .unwrap()
             .contains("No key found"));
@@ -444,8 +448,22 @@ mod tests {
     #[test]
     fn test_empty_outfile() {
         let (r1, r2, s1, s2, z1, z2, pk) = fixture();
-        let err = search(r1, r2, s1, s2, z1, z2, pk, -2, 0, 1, None, true, "   ")
-            .expect_err("should reject empty");
+        let params = SearchParams {
+            r1,
+            r2,
+            s1,
+            s2,
+            z1,
+            z2,
+            target: pk,
+            start: -2,
+            end: 0,
+            step: 1,
+            threads: None,
+            quiet: true,
+            outfile: "   ".into(),
+        };
+        let err = search(&params).expect_err("should reject empty");
         assert!(err.to_string().contains("outfile"));
     }
 
@@ -468,7 +486,22 @@ mod tests {
         let z2 = Scalar::from(0u64) - Scalar::from(0x3039u64);
 
         let out = temp_log("step_zero");
-        search(r1, r2, s1, s2, z1, z2, pk, 0, 10, 1, None, true, &out).unwrap();
+        let params = SearchParams {
+            r1,
+            r2,
+            s1,
+            s2,
+            z1,
+            z2,
+            target: pk,
+            start: 0,
+            end: 10,
+            step: 1,
+            threads: None,
+            quiet: true,
+            outfile: out.clone(),
+        };
+        search(&params).unwrap();
         let log = std::fs::read_to_string(&out).unwrap();
         assert!(log.contains("FOUND delta=0"));
         let _ = std::fs::remove_file(&out);
@@ -479,7 +512,17 @@ mod tests {
         let (r1, r2, s1, s2, z1, z2, pk) = fixture();
         let (alpha, beta) = derive_affine_constants(r1, r2, s1, s2, z1, z2).unwrap();
         let step_point = ProjectivePoint::GENERATOR * (alpha * Scalar::from(1u64));
-        let found = bsgs(pk, -10, 1, 21, 4, alpha, beta, step_point).unwrap();
+        let scan = search::ScanParams {
+            target: pk,
+            start: -10,
+            step: 1,
+            total: 21,
+            thread_count: 4,
+            alpha,
+            beta,
+            step_point,
+        };
+        let found = bsgs(&scan).unwrap();
         assert_eq!(found, Some(-1));
     }
 
@@ -488,8 +531,17 @@ mod tests {
         let (r1, r2, s1, s2, z1, z2, pk) = fixture();
         let (alpha, beta) = derive_affine_constants(r1, r2, s1, s2, z1, z2).unwrap();
         let step_point = ProjectivePoint::GENERATOR * (alpha * Scalar::from(1u64));
-        // N = 201, expected at delta = -1
-        let found = bsgs(pk, -100, 1, 201, 4, alpha, beta, step_point).unwrap();
+        let scan = search::ScanParams {
+            target: pk,
+            start: -100,
+            step: 1,
+            total: 201,
+            thread_count: 4,
+            alpha,
+            beta,
+            step_point,
+        };
+        let found = bsgs(&scan).unwrap();
         assert_eq!(found, Some(-1));
     }
 

@@ -1,7 +1,7 @@
 use crate::{crypto::affine_key, crypto::derive_private_key, Error, Result};
 use k256::{elliptic_curve::BatchNormalize, AffinePoint, ProjectivePoint, PublicKey, Scalar};
 use rayon::prelude::*;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxBuildHasher, FxHashMap};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use tracing::{info, warn};
@@ -10,6 +10,7 @@ pub const BSGS_THRESHOLD: u128 = 1 << 32;
 const BSGS_MAX_M: u64 = 1 << 26;
 const IDENTITY_KEY: [u8; 33] = [0u8; 33];
 const BATCH: u64 = 4096;
+const PARALLEL_BATCH: u128 = 1024;
 
 static SHUTDOWN: AtomicBool = AtomicBool::new(false);
 
@@ -23,86 +24,91 @@ pub fn set_shutdown() {
     SHUTDOWN.store(true, Ordering::SeqCst);
 }
 
+/// Parameters shared by `parallel_scan` and `bsgs`.
+pub struct ScanParams {
+    pub target: PublicKey,
+    pub start: i64,
+    pub step: i64,
+    pub total: u128,
+    pub thread_count: usize,
+    pub alpha: Scalar,
+    pub beta: Scalar,
+    pub step_point: ProjectivePoint,
+}
+
 /// High-speed parallel scan for ranges with at most `BSGS_THRESHOLD` candidates.
 ///
 /// Each thread processes a contiguous chunk of the delta range, evaluating
 /// `d(delta) = alpha * delta + beta` and comparing the resulting public key
 /// against the target using projective point equality (no field inversion).
-#[allow(clippy::too_many_arguments)]
-pub fn parallel_scan(
-    target: PublicKey,
-    start: i64,
-    step: i64,
-    total: u128,
-    thread_count: usize,
-    alpha: Scalar,
-    beta: Scalar,
-    step_point: ProjectivePoint,
-) -> Result<Option<i64>> {
-    let target_affine: AffinePoint = *target.as_affine();
-    let chunk: u128 = total.div_ceil(thread_count as u128);
+pub fn parallel_scan(scan: &ScanParams) -> Result<Option<i64>> {
+    let target_affine: AffinePoint = *scan.target.as_affine();
+    let chunk: u128 = scan.total.div_ceil(scan.thread_count as u128);
     let not_found = i64::MAX;
     let result = Arc::new(std::sync::atomic::AtomicI64::new(not_found));
 
     let pool = rayon::ThreadPoolBuilder::new()
-        .num_threads(thread_count)
+        .num_threads(scan.thread_count)
         .build()
         .map_err(|e| Error(format!("thread pool: {e}")))?;
 
-    const INNER_BATCH: u128 = 1024;
-
     pool.install(|| {
-        (0..thread_count).into_par_iter().for_each(|thread_id| {
-            if shutdown() {
-                return;
-            }
-            let chunk_start = thread_id as u128 * chunk;
-            if chunk_start >= total {
-                return;
-            }
-            let count = chunk.min(total - chunk_start);
-
-            let start_delta = start as i128 + chunk_start as i128 * step as i128;
-            let mut d0 = match i64::try_from(start_delta) {
-                Ok(v) => v,
-                Err(_) => return,
-            };
-            let mut point = ProjectivePoint::GENERATOR * derive_private_key(d0, alpha, beta);
-
-            let mut i = 0u128;
-            while i < count {
-                if shutdown() || result.load(Ordering::Acquire) != not_found {
-                    break;
+        (0..scan.thread_count)
+            .into_par_iter()
+            .for_each(|thread_id| {
+                if shutdown() {
+                    return;
                 }
-                let batch_end = (i + INNER_BATCH).min(count);
-                let mut found = false;
-                for _ in i..batch_end {
-                    if point == target_affine {
-                        let _ = result.compare_exchange(
-                            not_found,
-                            d0,
-                            Ordering::SeqCst,
-                            Ordering::Relaxed,
-                        );
-                        found = true;
+                let chunk_start = thread_id as u128 * chunk;
+                if chunk_start >= scan.total {
+                    return;
+                }
+                let count = chunk.min(scan.total - chunk_start);
+
+                let Ok(chunk_start_i128) = i128::try_from(chunk_start) else {
+                    return;
+                };
+                let start_delta = i128::from(scan.start) + chunk_start_i128 * i128::from(scan.step);
+                let Ok(mut d0) = i64::try_from(start_delta) else {
+                    return;
+                };
+                let mut point =
+                    ProjectivePoint::GENERATOR * derive_private_key(d0, scan.alpha, scan.beta);
+
+                let mut i = 0u128;
+                while i < count {
+                    if shutdown() || result.load(Ordering::Acquire) != not_found {
                         break;
                     }
-                    point += step_point;
-                    d0 = d0.wrapping_add(step);
+                    let batch_end = (i + PARALLEL_BATCH).min(count);
+                    let mut found = false;
+                    for _ in i..batch_end {
+                        if point == target_affine {
+                            let _ = result.compare_exchange(
+                                not_found,
+                                d0,
+                                Ordering::SeqCst,
+                                Ordering::Relaxed,
+                            );
+                            found = true;
+                            break;
+                        }
+                        point += scan.step_point;
+                        d0 = d0.wrapping_add(scan.step);
+                    }
+                    i = batch_end;
+                    if found {
+                        break;
+                    }
                 }
-                i = batch_end;
-                if found {
-                    break;
-                }
-            }
-        });
+            });
     });
 
     let found = result.load(Ordering::SeqCst);
-    if found != not_found {
-        Ok(Some(found))
-    } else {
+    if found == not_found {
         Ok(None)
+    } else {
+        Ok(Some(found))
     }
 }
 
@@ -117,63 +123,54 @@ pub fn parallel_scan(
 ///   `O(BSGS_MAX_M)`.
 ///
 /// `total` must fit in `u128` (guaranteed by the caller).
-#[allow(clippy::too_many_arguments)]
-pub fn bsgs(
-    target: PublicKey,
-    start: i64,
-    step: i64,
-    total: u128,
-    thread_count: usize,
-    alpha: Scalar,
-    beta: Scalar,
-    step_point: ProjectivePoint,
-) -> Result<Option<i64>> {
-    let target_affine: AffinePoint = *target.as_affine();
-    let d0_scalar = derive_private_key(start, alpha, beta);
+pub fn bsgs(scan: &ScanParams) -> Result<Option<i64>> {
+    let target_affine: AffinePoint = *scan.target.as_affine();
+    let d0_scalar = derive_private_key(scan.start, scan.alpha, scan.beta);
     let d0_point = ProjectivePoint::GENERATOR * d0_scalar;
 
     if d0_point == target_affine {
-        return Ok(Some(start));
+        return Ok(Some(scan.start));
     }
 
     let mut t: ProjectivePoint = target_affine.into();
     t -= d0_point;
 
     // Compute m = ceil(sqrt(total)) as u128.
-    let mut m = (total as f64).sqrt().ceil() as u128;
+    let mut m = scan.total.isqrt();
+    if m * m < scan.total {
+        m += 1;
+    }
     if m == 0 {
         m = 1;
     }
-    while m * m < total {
-        m += 1;
-    }
-    while m > 1 && (m - 1) * (m - 1) >= total {
+    while m > 1 && (m - 1) * (m - 1) >= scan.total {
         m -= 1;
     }
 
     let pool = rayon::ThreadPoolBuilder::new()
-        .num_threads(thread_count)
+        .num_threads(scan.thread_count)
         .build()
         .map_err(|e| Error(format!("thread pool: {e}")))?;
 
-    if m <= BSGS_MAX_M as u128 {
+    if m <= u128::from(BSGS_MAX_M) {
         // Standard in-memory BSGS.
-        let m_u64 = m as u64;
-        let baby_map = pool.install(|| build_baby_steps(m_u64, step_point, thread_count));
-        run_giant_steps(
+        let m_u64 = u64::try_from(m).map_err(|_| Error("BSGS m overflow".into()))?;
+        let baby_map = pool.install(|| build_baby_steps(m_u64, scan.step_point, scan.thread_count));
+        let params = GiantStepParams {
             t,
-            m_u64,
-            total,
-            thread_count,
-            step_point,
-            start,
-            step,
-            &baby_map,
-            &pool,
-        )
+            m: m_u64,
+            total: scan.total,
+            thread_count: scan.thread_count,
+            step_point: scan.step_point,
+            start: scan.start,
+            step: scan.step,
+            baby_map: &baby_map,
+            pool: &pool,
+        };
+        Ok(run_giant_steps(&params))
     } else {
         // Segmented BSGS: process baby steps in chunks to stay within RAM.
-        let segment_size = BSGS_MAX_M as u128;
+        let segment_size = u128::from(BSGS_MAX_M);
         let num_segments = m.div_ceil(segment_size);
         info!(
             bsgs_mode = "segmented",
@@ -192,35 +189,41 @@ pub fn bsgs(
 
             let seg_start = seg * segment_size;
             let seg_end = ((seg + 1) * segment_size).min(m);
-            let seg_len = (seg_end - seg_start) as u64;
+            let seg_len = u64::try_from(seg_end - seg_start)
+                .map_err(|_| Error("BSGS segment length overflow".into()))?;
 
             if seg_len == 0 {
                 continue;
             }
 
             // Build baby-step table for this segment.
-            let baby_map = pool
-                .install(|| build_baby_steps_segment(seg_start, seg_len, step_point, thread_count));
+            let baby_map = pool.install(|| {
+                build_baby_steps_segment(seg_start, seg_len, scan.step_point, scan.thread_count)
+            });
 
             // Run all giant steps against this segment.
-            let found = run_giant_steps(
+            let m_u64 = u64::try_from(m).map_err(|_| Error("BSGS m overflow".into()))?;
+            let params = GiantStepParams {
                 t,
-                m as u64,
-                total,
-                thread_count,
-                step_point,
-                start,
-                step,
-                &baby_map,
-                &pool,
-            )?;
+                m: m_u64,
+                total: scan.total,
+                thread_count: scan.thread_count,
+                step_point: scan.step_point,
+                start: scan.start,
+                step: scan.step,
+                baby_map: &baby_map,
+                pool: &pool,
+            };
+            let found = run_giant_steps(&params);
 
             if found.is_some() {
                 return Ok(found);
             }
 
             // Progress logging every segment (and at 25/50/75%).
-            let pct = ((seg + 1) as f64 / num_segments as f64) * 100.0;
+            let seg_f = u64::try_from(seg + 1).expect("segment index fits in u64") as f64;
+            let total_f = u64::try_from(num_segments).expect("segment count fits in u64") as f64;
+            let pct = seg_f / total_f * 100.0;
             if seg % 4 == 3 || seg + 1 == num_segments {
                 info!(
                     segment = seg + 1,
@@ -235,11 +238,8 @@ pub fn bsgs(
     }
 }
 
-/// Giant-step phase shared by standard and segmented BSGS.
-///
-/// Splits the `m` giant steps across worker threads and checks each batch
-/// against the supplied `baby_map`.
-fn run_giant_steps(
+/// Parameters for the giant-step phase shared by standard and segmented BSGS.
+struct GiantStepParams<'a> {
     t: ProjectivePoint,
     m: u64,
     total: u128,
@@ -247,30 +247,39 @@ fn run_giant_steps(
     step_point: ProjectivePoint,
     start: i64,
     step: i64,
-    baby_map: &FxHashMap<[u8; 33], u128>,
-    pool: &rayon::ThreadPool,
-) -> Result<Option<i64>> {
-    let m_scalar = Scalar::from(m);
-    let m_step = step_point * m_scalar;
+    baby_map: &'a FxHashMap<[u8; 33], u128>,
+    pool: &'a rayon::ThreadPool,
+}
+
+/// Giant-step phase shared by standard and segmented BSGS.
+///
+/// Splits the `m` giant steps across worker threads and checks each batch
+/// against the supplied `baby_map`.
+fn run_giant_steps(p: &GiantStepParams<'_>) -> Option<i64> {
+    let m_scalar = Scalar::from(p.m);
+    let m_step = p.step_point * m_scalar;
 
     let result = Arc::new(AtomicU64::new(u64::MAX));
 
-    pool.install(|| {
-        (0..thread_count).into_par_iter().for_each(|tid| {
+    p.pool.install(|| {
+        (0..p.thread_count).into_par_iter().for_each(|tid| {
             if shutdown() || result.load(Ordering::Acquire) != u64::MAX {
                 return;
             }
-            let chunk_start = tid as u128 * m as u128 / thread_count as u128;
-            let chunk_end = ((tid + 1) as u128 * m as u128 / thread_count as u128).min(m as u128);
+            let chunk_start = tid as u128 * u128::from(p.m) / p.thread_count as u128;
+            let chunk_end =
+                ((tid + 1) as u128 * u128::from(p.m) / p.thread_count as u128).min(u128::from(p.m));
             if chunk_start >= chunk_end {
                 return;
             }
 
-            let chunk_start_u64 = chunk_start as u64;
-            let chunk_end_u64 = chunk_end as u64;
-            let coeff = chunk_start_u64 as u128 * m as u128;
-            let offset = step_point * Scalar::from(coeff as u64);
-            let mut giant = t - offset;
+            let chunk_start_u64 =
+                u64::try_from(chunk_start).expect("chunk_start < p.m fits in u64");
+            let chunk_end_u64 = u64::try_from(chunk_end).expect("chunk_end <= p.m fits in u64");
+            let coeff = u128::from(chunk_start_u64) * u128::from(p.m);
+            let offset =
+                p.step_point * Scalar::from(u64::try_from(coeff).expect("coeff fits in u64"));
+            let mut giant = p.t - offset;
 
             let mut i = chunk_start_u64;
             while i < chunk_end_u64 {
@@ -278,14 +287,14 @@ fn run_giant_steps(
                     break;
                 }
                 let batch_end = (i + BATCH).min(chunk_end_u64);
-                let mut entries: Vec<(u64, ProjectivePoint)> =
-                    Vec::with_capacity((batch_end - i) as usize);
+                let batch_size = usize::try_from(batch_end - i).expect("BATCH fits in usize");
+                let mut entries: Vec<(u64, ProjectivePoint)> = Vec::with_capacity(batch_size);
                 let mut current = giant;
                 for idx in 0..(batch_end - i) {
                     if current == ProjectivePoint::IDENTITY {
-                        if let Some(&j) = baby_map.get(&IDENTITY_KEY) {
-                            let k = (i as u128 + idx as u128) * m as u128 + j;
-                            if k < total {
+                        if let Some(&j) = p.baby_map.get(&IDENTITY_KEY) {
+                            let k = (u128::from(i) + u128::from(idx)) * u128::from(p.m) + j;
+                            if k < p.total {
                                 let _ = result.compare_exchange(
                                     u64::MAX,
                                     1,
@@ -309,9 +318,9 @@ fn run_giant_steps(
                     for (affine_idx, affine) in affines.iter().enumerate() {
                         let idx = entries[affine_idx].0;
                         let key = affine_key(affine);
-                        if let Some(&j) = baby_map.get(&key) {
-                            let k = (i as u128 + idx as u128) * m as u128 + j;
-                            if k < total {
+                        if let Some(&j) = p.baby_map.get(&key) {
+                            let k = (u128::from(i) + u128::from(idx)) * u128::from(p.m) + j;
+                            if k < p.total {
                                 let _ = result.compare_exchange(
                                     u64::MAX,
                                     1,
@@ -330,46 +339,41 @@ fn run_giant_steps(
         });
     });
 
-    let did_find = result.load(Ordering::SeqCst) != u64::MAX;
-    if did_find {
-        // Reconstruct the exact k by iterating over segments again.
-        // In practice we do a second pass only over giant steps, but for
-        // simplicity we scan the same giant-step space sequentially until we
-        // hit the match.
-        warn!("BSGS match detected; reconstructing exact delta");
-        for k in 0..m {
-            if shutdown() {
-                break;
-            }
-            let point = t - step_point * Scalar::from(k * m);
-            if point == ProjectivePoint::IDENTITY {
-                if let Some(&j) = baby_map.get(&IDENTITY_KEY) {
-                    let candidate = k as u128 * m as u128 + j;
-                    if candidate < total {
-                        let delta_i128 = start as i128 + candidate as i128 * step as i128;
-                        if let Ok(delta) = i64::try_from(delta_i128) {
-                            return Ok(Some(delta));
-                        }
-                    }
-                }
-            } else {
-                let enc = affine_key(&point.to_affine());
-                if let Some(&j) = baby_map.get(&enc) {
-                    let candidate = k as u128 * m as u128 + j;
-                    if candidate < total {
-                        let delta_i128 = start as i128 + candidate as i128 * step as i128;
-                        if let Ok(delta) = i64::try_from(delta_i128) {
-                            return Ok(Some(delta));
-                        }
-                    }
+    if result.load(Ordering::SeqCst) == u64::MAX {
+        return None;
+    }
+    reconstruct_delta(p)
+}
+
+/// Reconstruct the exact delta after the parallel giant-step phase signals a
+/// match.
+fn reconstruct_delta(p: &GiantStepParams<'_>) -> Option<i64> {
+    warn!("BSGS match detected; reconstructing exact delta");
+    for k in 0..p.m {
+        if shutdown() {
+            break;
+        }
+        let km = u128::from(k) * u128::from(p.m);
+        let point = p.t - p.step_point * Scalar::from(km);
+        let lookup = if point == ProjectivePoint::IDENTITY {
+            p.baby_map.get(&IDENTITY_KEY)
+        } else {
+            p.baby_map.get(&affine_key(&point.to_affine()))
+        };
+        if let Some(&j) = lookup {
+            let candidate = km + j;
+            if candidate < p.total {
+                let Ok(candidate_i128) = i128::try_from(candidate) else {
+                    continue;
+                };
+                let delta_i128 = i128::from(p.start) + candidate_i128 * i128::from(p.step);
+                if let Ok(delta) = i64::try_from(delta_i128) {
+                    return Some(delta);
                 }
             }
         }
-        // Should never reach here if the parallel phase signalled a match.
-        Ok(None)
-    } else {
-        Ok(None)
     }
+    None
 }
 
 /// Build the full baby-step table for standard BSGS (`m <= BSGS_MAX_M`).
@@ -386,8 +390,10 @@ fn build_baby_steps(
             if start_j >= end_j {
                 return FxHashMap::default();
             }
-            let mut map =
-                FxHashMap::with_capacity_and_hasher((end_j - start_j) as usize, Default::default());
+            let mut map = FxHashMap::with_capacity_and_hasher(
+                usize::try_from(end_j - start_j).expect("batch fits in usize"),
+                FxBuildHasher,
+            );
 
             if start_j == 0 {
                 map.insert(IDENTITY_KEY, 0);
@@ -395,11 +401,12 @@ fn build_baby_steps(
 
             let mut j = if start_j == 0 { 1 } else { start_j };
             let mut current = step_point * Scalar::from(j);
-            let mut points = Vec::with_capacity(BATCH as usize);
+            let mut points =
+                Vec::with_capacity(usize::try_from(BATCH).expect("BATCH fits in usize"));
 
             while j < end_j {
                 let batch_end = (j + BATCH).min(end_j);
-                let batch_size = (batch_end - j) as usize;
+                let batch_size = usize::try_from(batch_end - j).expect("batch fits in usize");
                 points.clear();
                 points.reserve(batch_size);
 
@@ -412,7 +419,10 @@ fn build_baby_steps(
 
                 for (idx, affine) in affines.iter().enumerate() {
                     let key = affine_key(affine);
-                    map.insert(key, j as u128 + idx as u128);
+                    map.insert(
+                        key,
+                        u128::from(j) + u128::try_from(idx).expect("idx fits in u128"),
+                    );
                 }
 
                 j = batch_end;
@@ -421,7 +431,10 @@ fn build_baby_steps(
         })
         .collect();
 
-    let mut merged = FxHashMap::with_capacity_and_hasher(m as usize, Default::default());
+    let mut merged = FxHashMap::with_capacity_and_hasher(
+        usize::try_from(m).expect("m fits in usize"),
+        FxBuildHasher,
+    );
     for map in maps {
         merged.extend(map);
     }
@@ -438,24 +451,27 @@ fn build_baby_steps_segment(
     let maps: Vec<FxHashMap<[u8; 33], u128>> = (0..thread_count)
         .into_par_iter()
         .map(|tid| {
-            let start_j = tid as u128 * seg_len as u128 / thread_count as u128;
-            let end_j =
-                ((tid + 1) as u128 * seg_len as u128 / thread_count as u128).min(seg_len as u128);
+            let start_j = tid as u128 * u128::from(seg_len) / thread_count as u128;
+            let end_j = ((tid + 1) as u128 * u128::from(seg_len) / thread_count as u128)
+                .min(u128::from(seg_len));
             if start_j >= end_j {
                 return FxHashMap::default();
             }
-            let mut map =
-                FxHashMap::with_capacity_and_hasher((end_j - start_j) as usize, Default::default());
+            let mut map = FxHashMap::with_capacity_and_hasher(
+                usize::try_from(end_j - start_j).expect("batch fits in usize"),
+                FxBuildHasher,
+            );
 
             let abs_start = seg_start + start_j;
             let abs_end = seg_start + end_j;
             let mut j = abs_start;
-            let mut current = step_point * Scalar::from(j as u64);
-            let mut points = Vec::with_capacity(BATCH as usize);
+            let mut current = step_point * Scalar::from(u64::try_from(j).expect("j fits in u64"));
+            let mut points =
+                Vec::with_capacity(usize::try_from(BATCH).expect("BATCH fits in usize"));
 
             while j < abs_end {
-                let batch_end = (j + BATCH as u128).min(abs_end);
-                let batch_size = (batch_end - j) as usize;
+                let batch_end = (j + u128::from(BATCH)).min(abs_end);
+                let batch_size = usize::try_from(batch_end - j).expect("batch fits in usize");
                 points.clear();
                 points.reserve(batch_size);
 
@@ -468,7 +484,7 @@ fn build_baby_steps_segment(
 
                 for (idx, affine) in affines.iter().enumerate() {
                     let key = affine_key(affine);
-                    map.insert(key, j + idx as u128);
+                    map.insert(key, j + u128::try_from(idx).expect("idx fits in u128"));
                 }
 
                 j = batch_end;
@@ -477,7 +493,10 @@ fn build_baby_steps_segment(
         })
         .collect();
 
-    let mut merged = FxHashMap::with_capacity_and_hasher(seg_len as usize, Default::default());
+    let mut merged = FxHashMap::with_capacity_and_hasher(
+        usize::try_from(seg_len).expect("seg_len fits in usize"),
+        FxBuildHasher,
+    );
     for map in maps {
         merged.extend(map);
     }

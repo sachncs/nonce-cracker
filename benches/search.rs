@@ -83,7 +83,7 @@ fn bench_point_multiplication(c: &mut Criterion) {
 fn bench_search_chunk(c: &mut Criterion) {
     let mut group = c.benchmark_group("search_chunk");
 
-    for size in [1000u64, 10000, 100000].iter() {
+    for size in &[1000u64, 10000, 100000] {
         group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, &size| {
             let alpha = parse_scalar_hex(
                 "a7fa8b4a2944338eee5180dbee8e763334c9c09c5f6450c8e08150714e3bd81b",
