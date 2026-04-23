@@ -50,6 +50,12 @@ pub fn init() -> Result<(), LoggingError> {
         .open(&log_path)
         .map_err(|e| LoggingError::Logger(e.to_string()))?;
 
+    // Pre-validate that the file handle can be cloned; subsequent clones
+    // inside the tracing closure should not fail in practice.
+    let _ = file
+        .try_clone()
+        .map_err(|e| LoggingError::Logger(format!("clone log file: {e}")))?;
+
     let subscriber = tracing_subscriber::registry::Registry::default().with(env_filter);
 
     let fmt_layer = tracing_subscriber::fmt::layer()

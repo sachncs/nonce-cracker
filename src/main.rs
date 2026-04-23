@@ -1,36 +1,55 @@
-use clap::{Parser, Subcommand};
-use hex::FromHex;
-use k256::{
-    elliptic_curve::{sec1::ToEncodedPoint, BatchNormalize, PrimeField},
-    AffinePoint, ProjectivePoint, PublicKey, Scalar,
+use crate::crypto::{
+    derive_affine_constants, derive_private_key, parse_int, parse_pubkey, parse_scalar, scalar_hex,
 };
-use rayon::prelude::*;
+use crate::search::{bsgs, parallel_scan, set_shutdown, BSGS_THRESHOLD};
+use clap::{Parser, Subcommand};
+use k256::{AffinePoint, ProjectivePoint, PublicKey, Scalar};
 use std::{
-    collections::HashMap,
     fs::File,
     io::{BufWriter, Write},
-    num::ParseIntError,
     path::PathBuf,
-    sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering},
-    sync::Arc,
-    thread,
     time::{SystemTime, UNIX_EPOCH},
 };
 use tracing::{error, info, warn, Level};
 
 mod config;
+mod crypto;
 mod logging;
 mod metrics;
+mod search;
 
-const NOT_FOUND: i64 = i64::MAX;
-const BSGS_THRESHOLD: u128 = 1 << 32;
-const BSGS_MAX_M: u64 = 1 << 26;
-const IDENTITY_KEY: [u8; 33] = [0u8; 33];
-static SHUTDOWN: AtomicBool = AtomicBool::new(false);
+#[derive(Debug)]
+struct Error(String);
 
-fn shutdown() -> bool {
-    SHUTDOWN.load(Ordering::Relaxed)
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
 }
+impl std::error::Error for Error {}
+
+impl From<hex::FromHexError> for Error {
+    fn from(e: hex::FromHexError) -> Self {
+        Self(format!("hex parse error: {e}"))
+    }
+}
+impl From<std::num::ParseIntError> for Error {
+    fn from(e: std::num::ParseIntError) -> Self {
+        Self(format!("number parse error: {e}"))
+    }
+}
+impl From<std::io::Error> for Error {
+    fn from(e: std::io::Error) -> Self {
+        Self(format!("io error: {e}"))
+    }
+}
+impl From<logging::LoggingError> for Error {
+    fn from(e: logging::LoggingError) -> Self {
+        Self(format!("logging error: {e}"))
+    }
+}
+
+type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -79,39 +98,6 @@ enum Commands {
     Example,
 }
 
-#[derive(Debug)]
-struct Error(String);
-
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-impl std::error::Error for Error {}
-
-impl From<hex::FromHexError> for Error {
-    fn from(e: hex::FromHexError) -> Self {
-        Self(format!("hex parse error: {e}"))
-    }
-}
-impl From<ParseIntError> for Error {
-    fn from(e: ParseIntError) -> Self {
-        Self(format!("number parse error: {e}"))
-    }
-}
-impl From<std::io::Error> for Error {
-    fn from(e: std::io::Error) -> Self {
-        Self(format!("io error: {e}"))
-    }
-}
-impl From<logging::LoggingError> for Error {
-    fn from(e: logging::LoggingError) -> Self {
-        Self(format!("logging error: {e}"))
-    }
-}
-
-type Result<T> = std::result::Result<T, Error>;
-
 fn main() {
     if let Err(e) = config::Config::init() {
         eprintln!("config: {e}");
@@ -133,7 +119,7 @@ fn main() {
             for sig in signals.forever() {
                 if sig == signal_hook::consts::SIGINT || sig == signal_hook::consts::SIGTERM {
                     info!(signal = sig, "shutdown signal received");
-                    SHUTDOWN.store(true, Ordering::SeqCst);
+                    set_shutdown();
                     break;
                 }
             }
@@ -270,7 +256,7 @@ fn search(
             max_threads
         }
         Some(t) => t,
-        None => thread::available_parallelism()
+        None => std::thread::available_parallelism()
             .map(std::num::NonZeroUsize::get)
             .unwrap_or(1)
             .min(max_threads),
@@ -389,370 +375,6 @@ fn search(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
-fn parallel_scan(
-    target: PublicKey,
-    start: i64,
-    step: i64,
-    total: u128,
-    thread_count: usize,
-    alpha: Scalar,
-    beta: Scalar,
-    step_point: ProjectivePoint,
-) -> Result<Option<i64>> {
-    let target_affine: AffinePoint = *target.as_affine();
-    let chunk: u128 = total.div_ceil(thread_count as u128);
-    let result = Arc::new(AtomicI64::new(NOT_FOUND));
-
-    let pool = rayon::ThreadPoolBuilder::new()
-        .num_threads(thread_count)
-        .build()
-        .map_err(|e| Error(format!("thread pool: {e}")))?;
-
-    const BATCH: u128 = 1024;
-
-    pool.install(|| {
-        (0..thread_count).into_par_iter().for_each(|thread_id| {
-            if shutdown() {
-                return;
-            }
-            let chunk_start = thread_id as u128 * chunk;
-            if chunk_start >= total {
-                return;
-            }
-            let count = chunk.min(total - chunk_start);
-
-            let start_delta = start as i128 + chunk_start as i128 * step as i128;
-            let mut d0 = match i64::try_from(start_delta) {
-                Ok(v) => v,
-                Err(_) => return,
-            };
-            let mut point = ProjectivePoint::GENERATOR * derive_private_key(d0, alpha, beta);
-
-            let mut i = 0u128;
-            while i < count {
-                if shutdown() || result.load(Ordering::Acquire) != NOT_FOUND {
-                    break;
-                }
-                let batch_end = (i + BATCH).min(count);
-                let mut found = false;
-                for _ in i..batch_end {
-                    if point == target_affine {
-                        let _ = result.compare_exchange(
-                            NOT_FOUND,
-                            d0,
-                            Ordering::SeqCst,
-                            Ordering::Relaxed,
-                        );
-                        found = true;
-                        break;
-                    }
-                    point += step_point;
-                    d0 = d0.wrapping_add(step);
-                }
-                i = batch_end;
-                if found {
-                    break;
-                }
-            }
-        });
-    });
-
-    let found = result.load(Ordering::SeqCst);
-    if found != NOT_FOUND {
-        Ok(Some(found))
-    } else {
-        Ok(None)
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn bsgs(
-    target: PublicKey,
-    start: i64,
-    step: i64,
-    total: u128,
-    thread_count: usize,
-    alpha: Scalar,
-    beta: Scalar,
-    step_point: ProjectivePoint,
-) -> Result<Option<i64>> {
-    let target_affine: AffinePoint = *target.as_affine();
-    let d0_scalar = derive_private_key(start, alpha, beta);
-    let d0_point = ProjectivePoint::GENERATOR * d0_scalar;
-
-    if d0_point == target_affine {
-        return Ok(Some(start));
-    }
-
-    let mut t: ProjectivePoint = target_affine.into();
-    t -= d0_point;
-
-    let total_u64 = total as u64;
-    let mut m = (total_u64 as f64).sqrt().ceil() as u64;
-    if m == 0 {
-        m = 1;
-    }
-    while (m as u128) * (m as u128) < total {
-        m += 1;
-    }
-    while m > 1 && ((m - 1) as u128) * ((m - 1) as u128) >= total {
-        m -= 1;
-    }
-
-    if m > BSGS_MAX_M {
-        return Err(Error(format!(
-            "BSGS memory limit exceeded (m={m} > {BSGS_MAX_M}). Range too large for BSGS."
-        )));
-    }
-
-    let m_scalar = Scalar::from(m);
-    let m_step = step_point * m_scalar;
-
-    let pool = rayon::ThreadPoolBuilder::new()
-        .num_threads(thread_count)
-        .build()
-        .map_err(|e| Error(format!("thread pool: {e}")))?;
-
-    let baby_map = pool.install(|| build_baby_steps(m, step_point, thread_count));
-
-    let result = Arc::new(AtomicU64::new(u64::MAX));
-
-    const BATCH: u64 = 4096;
-
-    pool.install(|| {
-        (0..thread_count).into_par_iter().for_each(|tid| {
-            if shutdown() || result.load(Ordering::Acquire) != u64::MAX {
-                return;
-            }
-            let chunk_start = tid as u128 * m as u128 / thread_count as u128;
-            let chunk_end = ((tid + 1) as u128 * m as u128 / thread_count as u128).min(m as u128);
-            if chunk_start >= chunk_end {
-                return;
-            }
-
-            let chunk_start_u64 = chunk_start as u64;
-            let chunk_end_u64 = chunk_end as u64;
-            let coeff = chunk_start_u64 * m;
-            let offset = step_point * Scalar::from(coeff);
-            let mut giant = t - offset;
-
-            let mut i = chunk_start_u64;
-            while i < chunk_end_u64 {
-                if shutdown() || result.load(Ordering::Acquire) != u64::MAX {
-                    break;
-                }
-                let batch_end = (i + BATCH).min(chunk_end_u64);
-                let mut entries: Vec<(u64, ProjectivePoint)> =
-                    Vec::with_capacity((batch_end - i) as usize);
-                let mut current = giant;
-                for idx in 0..(batch_end - i) {
-                    if current == ProjectivePoint::IDENTITY {
-                        if let Some(&j) = baby_map.get(&IDENTITY_KEY) {
-                            let k = (i + idx) * m + j;
-                            if k < total_u64 {
-                                let _ = result.compare_exchange(
-                                    u64::MAX,
-                                    k,
-                                    Ordering::SeqCst,
-                                    Ordering::Relaxed,
-                                );
-                                return;
-                            }
-                        }
-                        current -= m_step;
-                        continue;
-                    }
-                    entries.push((idx, current));
-                    current -= m_step;
-                }
-
-                if !entries.is_empty() {
-                    let points: Vec<ProjectivePoint> = entries.iter().map(|(_, p)| *p).collect();
-                    let affines: Vec<AffinePoint> =
-                        ProjectivePoint::batch_normalize(points.as_slice());
-                    for (affine_idx, affine) in affines.iter().enumerate() {
-                        let idx = entries[affine_idx].0;
-                        let key = affine_key(affine);
-                        if let Some(&j) = baby_map.get(&key) {
-                            let k = (i + idx) * m + j;
-                            if k < total_u64 {
-                                let _ = result.compare_exchange(
-                                    u64::MAX,
-                                    k,
-                                    Ordering::SeqCst,
-                                    Ordering::Relaxed,
-                                );
-                                return;
-                            }
-                        }
-                    }
-                }
-
-                giant = current;
-                i = batch_end;
-            }
-        });
-    });
-
-    let found_k = result.load(Ordering::SeqCst);
-    if found_k != u64::MAX {
-        let delta_i128 = start as i128 + (found_k as i128) * (step as i128);
-        let delta = i64::try_from(delta_i128).map_err(|_| Error("delta overflow".into()))?;
-        Ok(Some(delta))
-    } else {
-        Ok(None)
-    }
-}
-
-fn build_baby_steps(
-    m: u64,
-    step_point: ProjectivePoint,
-    thread_count: usize,
-) -> HashMap<[u8; 33], u64> {
-    let maps: Vec<HashMap<[u8; 33], u64>> = (0..thread_count)
-        .into_par_iter()
-        .map(|tid| {
-            let start_j = tid as u64 * m / thread_count as u64;
-            let end_j = ((tid + 1) as u64 * m / thread_count as u64).min(m);
-            if start_j >= end_j {
-                return HashMap::new();
-            }
-            let mut map = HashMap::with_capacity((end_j - start_j) as usize);
-
-            if start_j == 0 {
-                map.insert(IDENTITY_KEY, 0);
-            }
-
-            const BATCH: u64 = 4096;
-            let mut j = if start_j == 0 { 1 } else { start_j };
-            let mut current = step_point * Scalar::from(j);
-
-            while j < end_j {
-                let batch_end = (j + BATCH).min(end_j);
-                let batch_size = (batch_end - j) as usize;
-                let mut points = Vec::with_capacity(batch_size);
-
-                for _ in 0..batch_size {
-                    points.push(current);
-                    current += step_point;
-                }
-
-                let affines: Vec<AffinePoint> = ProjectivePoint::batch_normalize(points.as_slice());
-
-                for (idx, affine) in affines.iter().enumerate() {
-                    let key = affine_key(affine);
-                    map.insert(key, j + idx as u64);
-                }
-
-                j = batch_end;
-            }
-            map
-        })
-        .collect();
-
-    let mut merged = HashMap::with_capacity(m as usize);
-    for map in maps {
-        merged.extend(map);
-    }
-    merged
-}
-
-#[inline]
-fn affine_key(affine: &AffinePoint) -> [u8; 33] {
-    let enc = affine.to_encoded_point(true);
-    let bytes = enc.as_bytes();
-    let mut key = [0u8; 33];
-    key[..bytes.len()].copy_from_slice(bytes);
-    key
-}
-
-#[inline(always)]
-fn derive_private_key(delta: i64, alpha: Scalar, beta: Scalar) -> Scalar {
-    let s = Scalar::from(delta.unsigned_abs());
-    if delta < 0 {
-        beta - alpha * s
-    } else {
-        alpha * s + beta
-    }
-}
-
-fn derive_affine_constants(
-    r1: Scalar,
-    r2: Scalar,
-    s1: Scalar,
-    s2: Scalar,
-    z1: Scalar,
-    z2: Scalar,
-) -> Result<(Scalar, Scalar)> {
-    let u: Scalar = Option::from(s1.invert()).ok_or_else(|| Error("s1 not invertible".into()))?;
-    let a: Scalar = s2 * r1 * u - r2;
-    let b: Scalar = z2 - s2 * z1 * u;
-    let c: Scalar = s2;
-    let a_inv: Scalar =
-        Option::from(a.invert()).ok_or_else(|| Error("denominator not invertible".into()))?;
-    Ok((-(c * a_inv), b * a_inv))
-}
-
-fn parse_scalar(s: &str) -> Result<Scalar> {
-    let raw = s.trim().trim_start_matches("0x").trim_start_matches("0X");
-    if raw.is_empty() {
-        return Err(Error("empty hex string".into()));
-    }
-    let padded = if raw.len() % 2 == 1 {
-        format!("0{raw}")
-    } else {
-        raw.to_string()
-    };
-    let bytes = Vec::from_hex(&padded)?;
-    if bytes.len() > 32 {
-        return Err(Error("scalar exceeds 32 bytes".into()));
-    }
-    let mut arr = [0u8; 32];
-    arr[32 - bytes.len()..].copy_from_slice(&bytes);
-    Option::from(Scalar::from_repr(arr.into())).ok_or_else(|| Error("scalar out of range".into()))
-}
-
-fn parse_pubkey(s: &str) -> Result<PublicKey> {
-    let bytes = Vec::from_hex(s.trim().trim_start_matches("0x").trim_start_matches("0X"))?;
-    match bytes.first() {
-        Some(0x02) | Some(0x03) if bytes.len() == 33 => {
-            PublicKey::from_sec1_bytes(&bytes).map_err(|e| Error(format!("pubkey: {e}")))
-        }
-        Some(0x04) if bytes.len() == 65 => {
-            PublicKey::from_sec1_bytes(&bytes).map_err(|e| Error(format!("pubkey: {e}")))
-        }
-        _ => Err(Error("pubkey: use 02, 03, or 04 prefix".into())),
-    }
-}
-
-fn parse_int(s: &str) -> Result<i64> {
-    let s = s.trim();
-    let (neg, body) = if let Some(r) = s.strip_prefix('-') {
-        (true, r)
-    } else if let Some(r) = s.strip_prefix('+') {
-        (false, r)
-    } else {
-        (false, s)
-    };
-
-    let mag = if body.starts_with("0x") || body.starts_with("0X") {
-        u128::from_str_radix(&body[2..], 16).map_err(|e| Error(format!("parse error: {e}")))?
-    } else {
-        body.parse::<u128>()
-            .map_err(|e| Error(format!("parse error: {e}")))?
-    };
-
-    if neg {
-        if mag > (i64::MAX as u128) + 1 {
-            return Err(Error("value overflows i64".into()));
-        }
-        i64::try_from(-(mag as i128)).map_err(|_| Error("value overflows i64".into()))
-    } else {
-        i64::try_from(mag).map_err(|_| Error("value overflows i64".into()))
-    }
-}
-
 fn resolve_path(p: &str) -> Result<PathBuf> {
     let p = p.trim();
     if p.is_empty() {
@@ -772,64 +394,11 @@ fn resolve_path(p: &str) -> Result<PathBuf> {
     Ok(logging::log_dir().join(path))
 }
 
-fn scalar_hex(s: &Scalar) -> String {
-    let bytes = s.to_bytes();
-    match bytes.iter().position(|b| *b != 0) {
-        None => "0".into(),
-        Some(i) => hex::encode(&bytes[i..]),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use k256::elliptic_curve::sec1::ToEncodedPoint;
+    use k256::elliptic_curve::{sec1::ToEncodedPoint, PrimeField};
     use std::time::{SystemTime, UNIX_EPOCH};
-
-    #[test]
-    fn test_precompute_and_private_key() {
-        let (a, b) = derive_affine_constants(
-            Scalar::from(1u64),
-            Scalar::from(2u64),
-            Scalar::from(3u64),
-            Scalar::from(4u64),
-            Scalar::from(5u64),
-            Scalar::from(6u64),
-        )
-        .unwrap();
-        assert_eq!(derive_private_key(0, a, b), b);
-    }
-
-    #[test]
-    fn test_pubkey_conversion() {
-        let pk_hex = "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798";
-        let pk = parse_pubkey(pk_hex).unwrap();
-        assert_eq!(hex::encode(pk.to_encoded_point(true).as_bytes()), pk_hex);
-    }
-
-    #[test]
-    fn test_hex_parsing() {
-        assert_eq!(parse_scalar("0xFF").unwrap(), parse_scalar("FF").unwrap());
-        assert_eq!(
-            parse_scalar("0xFFF").unwrap(),
-            parse_scalar("0x0FFF").unwrap()
-        );
-    }
-
-    #[test]
-    fn test_range_parsing() {
-        assert_eq!(parse_int("0").unwrap(), 0);
-        assert_eq!(parse_int("100").unwrap(), 100);
-        assert_eq!(parse_int("0xFF").unwrap(), 255);
-        assert_eq!(parse_int("-0xFF").unwrap(), -255);
-    }
-
-    #[test]
-    fn test_signed_delta() {
-        let a = Scalar::from(1u64);
-        let b = Scalar::from(2u64);
-        assert_eq!(derive_private_key(-1, a, b), b - a);
-    }
 
     #[test]
     fn test_unique_log_path() {
@@ -848,46 +417,6 @@ mod tests {
         let wrong = ProjectivePoint::GENERATOR * Scalar::from(1u64);
         assert!(matching == target);
         assert!(wrong != target);
-    }
-
-    #[test]
-    fn test_pubkey_invalid() {
-        assert!(parse_pubkey("").is_err());
-        assert!(parse_pubkey("0xgg").is_err());
-        assert!(parse_pubkey("01").is_err());
-        assert!(parse_pubkey(&("02".to_string() + &"ff".repeat(31))).is_err());
-        assert!(
-            parse_pubkey("0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798")
-                .is_ok()
-        );
-        let uncompressed = concat!(
-            "04",
-            "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
-            "483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8"
-        );
-        assert!(parse_pubkey(uncompressed).is_ok());
-    }
-
-    #[test]
-    fn test_edge_cases() {
-        assert!(derive_affine_constants(
-            Scalar::from(1u64),
-            Scalar::from(2u64),
-            Scalar::from(1u64),
-            Scalar::from(1u64),
-            Scalar::from(0u64),
-            Scalar::from(0u64),
-        )
-        .is_ok());
-    }
-
-    #[test]
-    fn test_bsgs_small_range() {
-        let (r1, r2, s1, s2, z1, z2, pk) = fixture();
-        let (alpha, beta) = derive_affine_constants(r1, r2, s1, s2, z1, z2).unwrap();
-        let step_point = ProjectivePoint::GENERATOR * (alpha * Scalar::from(1u64));
-        let found = bsgs(pk, -10, 1, 21, 4, alpha, beta, step_point).unwrap();
-        assert_eq!(found, Some(-1));
     }
 
     #[test]
@@ -918,6 +447,50 @@ mod tests {
         let err = search(r1, r2, s1, s2, z1, z2, pk, -2, 0, 1, None, true, "   ")
             .expect_err("should reject empty");
         assert!(err.to_string().contains("outfile"));
+    }
+
+    #[test]
+    fn test_step_scalar_zero() {
+        // When alpha = 0, all candidates evaluate to the same private key.
+        // The search should short-circuit after checking the first candidate.
+        let pk = PublicKey::from_sec1_bytes(
+            (ProjectivePoint::GENERATOR * Scalar::from(0x3039u64))
+                .to_affine()
+                .to_encoded_point(true)
+                .as_bytes(),
+        )
+        .unwrap();
+        let r1 = Scalar::from(1u64);
+        let r2 = Scalar::from(1u64);
+        let s1 = Scalar::from(1u64);
+        let s2 = Scalar::from(0u64);
+        let z1 = Scalar::from(0u64);
+        let z2 = Scalar::from(0u64) - Scalar::from(0x3039u64);
+
+        let out = temp_log("step_zero");
+        search(r1, r2, s1, s2, z1, z2, pk, 0, 10, 1, None, true, &out).unwrap();
+        let log = std::fs::read_to_string(&out).unwrap();
+        assert!(log.contains("FOUND delta=0"));
+        let _ = std::fs::remove_file(&out);
+    }
+
+    #[test]
+    fn test_bsgs_small_range() {
+        let (r1, r2, s1, s2, z1, z2, pk) = fixture();
+        let (alpha, beta) = derive_affine_constants(r1, r2, s1, s2, z1, z2).unwrap();
+        let step_point = ProjectivePoint::GENERATOR * (alpha * Scalar::from(1u64));
+        let found = bsgs(pk, -10, 1, 21, 4, alpha, beta, step_point).unwrap();
+        assert_eq!(found, Some(-1));
+    }
+
+    #[test]
+    fn test_bsgs_medium_range() {
+        let (r1, r2, s1, s2, z1, z2, pk) = fixture();
+        let (alpha, beta) = derive_affine_constants(r1, r2, s1, s2, z1, z2).unwrap();
+        let step_point = ProjectivePoint::GENERATOR * (alpha * Scalar::from(1u64));
+        // N = 201, expected at delta = -1
+        let found = bsgs(pk, -100, 1, 201, 4, alpha, beta, step_point).unwrap();
+        assert_eq!(found, Some(-1));
     }
 
     fn fixture() -> (Scalar, Scalar, Scalar, Scalar, Scalar, Scalar, PublicKey) {
