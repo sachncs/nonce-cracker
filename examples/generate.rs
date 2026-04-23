@@ -46,31 +46,31 @@ fn main() {
     let pk_hex = hex::encode(pk_enc.as_bytes());
 
     println!("// Generated test data for nonce-cracker");
-    println!("// Private key d = 0x{:x}", d);
-    println!("// k = 0x{:x}, k' = k + {} = 0x{:x}", k, delta, k_prime);
+    println!("// Private key d = 0x{d:x}");
+    println!("// k = 0x{k:x}, k' = k + {delta} = 0x{k_prime:x}");
     println!();
-    println!("// Signature 1 (k = 0x{:x}, z1 = 1):", k);
+    println!("// Signature 1 (k = 0x{k:x}, z1 = 1):");
     println!("let r1 = 0x{};", hex::encode(r1_arr));
     println!("let s1 = 0x{};", hex::encode(s1_scalar.to_bytes()));
     println!("let z1 = 0x0000000000000000000000000000000000000000000000000000000000000001;");
     println!();
-    println!("// Signature 2 (k' = 0x{:x}, z2 = 2):", k_prime);
+    println!("// Signature 2 (k' = 0x{k_prime:x}, z2 = 2):");
     println!("let r2 = 0x{};", hex::encode(r2_arr));
     println!("let s2 = 0x{};", hex::encode(s2_scalar.to_bytes()));
     println!("let z2 = 0x0000000000000000000000000000000000000000000000000000000000000002;");
     println!();
-    println!("let pubkey = \"{}\";", pk_hex);
+    println!("let pubkey = \"{pk_hex}\";");
     println!();
     println!("// Precomputed values:");
     println!("// alpha = 0x{}", hex::encode(alpha.to_bytes()));
     println!("// beta = 0x{}", hex::encode(beta.to_bytes()));
-    println!("// delta = {}", delta);
+    println!("// delta = {delta}");
     println!();
 
     if computed_d == d_scalar {
-        println!("// SUCCESS: d matches expected value 0x{:x}", d);
+        println!("// SUCCESS: d matches expected value 0x{d:x}");
     } else {
-        println!("// NOTE: computed d != expected d = 0x{:x}", d);
+        println!("// NOTE: computed d != expected d = 0x{d:x}");
     }
 
     println!("\n// === Rust code for src/main.rs ===");
@@ -86,7 +86,7 @@ fn main() {
         hex::encode(s2_scalar.to_bytes())
     );
     println!("let z2 = parse_scalar_hex(\"0x0000000000000000000000000000000000000000000000000000000000000002\")?;");
-    println!("let pk = parse_public_key(\"{}\")?;", pk_hex);
+    println!("let pk = parse_public_key(\"{pk_hex}\")?;");
     println!(
         "search(r1, r2, s1, s2, z1, z2, pk, 0, {}, 1, None, false, \"example.log\")?",
         delta + 1

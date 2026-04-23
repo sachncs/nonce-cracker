@@ -31,7 +31,7 @@ pub fn derive_affine_constants(
 
 /// Compute the candidate private key for a given `delta` using the affine
 /// relation `d = alpha * delta + beta`.
-#[inline(always)]
+#[inline]
 pub fn derive_private_key(delta: i64, alpha: Scalar, beta: Scalar) -> Scalar {
     let s = Scalar::from(delta.unsigned_abs());
     if delta < 0 {
@@ -72,7 +72,7 @@ pub fn parse_scalar(s: &str) -> Result<Scalar> {
 pub fn parse_pubkey(s: &str) -> Result<PublicKey> {
     let bytes = Vec::from_hex(s.trim().trim_start_matches("0x").trim_start_matches("0X"))?;
     match bytes.first() {
-        Some(0x02) | Some(0x03) if bytes.len() == 33 => {
+        Some(0x02 | 0x03) if bytes.len() == 33 => {
             PublicKey::from_sec1_bytes(&bytes).map_err(|e| Error(format!("pubkey: {e}")))
         }
         Some(0x04) if bytes.len() == 65 => {
@@ -103,10 +103,12 @@ pub fn parse_int(s: &str) -> Result<i64> {
     };
 
     if neg {
-        if mag > (i64::MAX as u128) + 1 {
+        let limit = u128::try_from(i64::MAX).expect("i64::MAX fits in u128") + 1;
+        if mag > limit {
             return Err(Error("value overflows i64".into()));
         }
-        i64::try_from(-(mag as i128)).map_err(|_| Error("value overflows i64".into()))
+        let signed = -(i128::try_from(mag).map_err(|_| Error("value overflows i64".into()))?);
+        i64::try_from(signed).map_err(|_| Error("value overflows i64".into()))
     } else {
         i64::try_from(mag).map_err(|_| Error("value overflows i64".into()))
     }
