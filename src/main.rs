@@ -1,9 +1,15 @@
-use crate::crypto::{
-    derive_affine_constants, derive_private_key, parse_int, parse_pubkey, parse_scalar, scalar_hex,
-};
-use crate::search::{bsgs, parallel_scan, set_shutdown, BSGS_THRESHOLD};
 use clap::{Args, Parser, Subcommand};
 use k256::{AffinePoint, ProjectivePoint, PublicKey, Scalar};
+use nonce_cracker::{
+    config,
+    crypto::{
+        derive_affine_constants, derive_private_key, parse_int, parse_pubkey, parse_scalar,
+        scalar_hex,
+    },
+    error::{Error, Result},
+    logging, metrics,
+    search::{self, bsgs, parallel_scan, set_shutdown, BSGS_THRESHOLD},
+};
 use std::{
     fs::File,
     io::{BufWriter, Write},
@@ -11,45 +17,6 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 use tracing::{error, info, warn, Level};
-
-mod config;
-mod crypto;
-mod logging;
-mod metrics;
-mod search;
-
-#[derive(Debug)]
-struct Error(String);
-
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-impl std::error::Error for Error {}
-
-impl From<hex::FromHexError> for Error {
-    fn from(e: hex::FromHexError) -> Self {
-        Self(format!("hex parse error: {e}"))
-    }
-}
-impl From<std::num::ParseIntError> for Error {
-    fn from(e: std::num::ParseIntError) -> Self {
-        Self(format!("number parse error: {e}"))
-    }
-}
-impl From<std::io::Error> for Error {
-    fn from(e: std::io::Error) -> Self {
-        Self(format!("io error: {e}"))
-    }
-}
-impl From<logging::LoggingError> for Error {
-    fn from(e: logging::LoggingError) -> Self {
-        Self(format!("logging error: {e}"))
-    }
-}
-
-type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -376,6 +343,7 @@ mod tests {
 
     #[test]
     fn test_unique_log_path() {
+        let _ = config::Config::init();
         let p1 = resolve_path("search.log").unwrap();
         let p2 = resolve_path("search.log").unwrap();
         assert_ne!(p1, p2);
@@ -395,6 +363,7 @@ mod tests {
 
     #[test]
     fn test_search_negative_delta() {
+        let _ = config::Config::init();
         let (r1, r2, s1, s2, z1, z2, pk) = fixture();
         let out = temp_log("neg_delta_found");
         let params = SearchParams {
@@ -421,6 +390,7 @@ mod tests {
 
     #[test]
     fn test_search_no_match() {
+        let _ = config::Config::init();
         let (r1, r2, s1, s2, z1, z2, pk) = fixture();
         let out = temp_log("neg_delta_miss");
         let params = SearchParams {
@@ -447,6 +417,7 @@ mod tests {
 
     #[test]
     fn test_empty_outfile() {
+        let _ = config::Config::init();
         let (r1, r2, s1, s2, z1, z2, pk) = fixture();
         let params = SearchParams {
             r1,
@@ -469,6 +440,7 @@ mod tests {
 
     #[test]
     fn test_step_scalar_zero() {
+        let _ = config::Config::init();
         // When alpha = 0, all candidates evaluate to the same private key.
         // The search should short-circuit after checking the first candidate.
         let pk = PublicKey::from_sec1_bytes(

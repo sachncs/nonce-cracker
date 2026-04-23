@@ -1,4 +1,4 @@
-use crate::{Error, Result};
+use crate::error::{Error, Result};
 use hex::FromHex;
 use k256::{
     elliptic_curve::{sec1::ToEncodedPoint, PrimeField},

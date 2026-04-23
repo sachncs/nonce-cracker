@@ -1,4 +1,8 @@
-use crate::{crypto::affine_key, crypto::derive_private_key, Error, Result};
+use crate::{
+    crypto::affine_key,
+    crypto::derive_private_key,
+    error::{Error, Result},
+};
 use k256::{elliptic_curve::BatchNormalize, AffinePoint, ProjectivePoint, PublicKey, Scalar};
 use rayon::prelude::*;
 use rustc_hash::{FxBuildHasher, FxHashMap};
