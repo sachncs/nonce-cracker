@@ -345,16 +345,25 @@ fn test_identity_plus_step() {
 
 #[test]
 fn test_dry_run_specific_values() {
-    use nonce_cracker::crypto::{derive_affine_constants, parse_scalar, parse_pubkey, scalar_hex};
     use k256::elliptic_curve::sec1::ToEncodedPoint;
+    use nonce_cracker::crypto::{derive_affine_constants, parse_pubkey, parse_scalar, scalar_hex};
 
-    let r1 = parse_scalar("0x59b220002f5dc107d18dd0152d7936f99368d85951b0234a7060847f6057e584").unwrap();
-    let s1 = parse_scalar("0xa7fa8b4a2944338eee5180dbee8e763334c9c09c5f6450c8e08150714e3bd81b").unwrap();
-    let z1 = parse_scalar("0x585e5a8c07383473109d225e68d210b5bc791f870357bf1c61fb5dbf6578740e").unwrap();
-    let r2 = parse_scalar("0x9b6debb986dbb835943987c859a3e81e93438393a367b58d8d539dba872fa954").unwrap();
-    let s2 = parse_scalar("0x7999704e31ccda0c3c6f2f34e028bbcbd1de65de33d02142eb241768bb5e8fea").unwrap();
-    let z2 = parse_scalar("0x7b2e9d83f2a851266582e49c88d0d5dc28638dd7b9b8b9cf4d77d60c16bfc7d5").unwrap();
-    let pk = parse_pubkey("04ed6f036f0d2a2813ed34d506ddd431e3633a767091e5272b6a0998eaf409666c1432e37b21709b4ddc5ae9efe7b583aaf44fc8e464881d3501d826457b2d40e9").unwrap();
+    let r1 =
+        parse_scalar("0x59b220002f5dc107d18dd0152d7936f99368d85951b0234a7060847f6057e584").unwrap();
+    let s1 =
+        parse_scalar("0xa7fa8b4a2944338eee5180dbee8e763334c9c09c5f6450c8e08150714e3bd81b").unwrap();
+    let z1 =
+        parse_scalar("0x585e5a8c07383473109d225e68d210b5bc791f870357bf1c61fb5dbf6578740e").unwrap();
+    let r2 =
+        parse_scalar("0x9b6debb986dbb835943987c859a3e81e93438393a367b58d8d539dba872fa954").unwrap();
+    let s2 =
+        parse_scalar("0x7999704e31ccda0c3c6f2f34e028bbcbd1de65de33d02142eb241768bb5e8fea").unwrap();
+    let z2 =
+        parse_scalar("0x7b2e9d83f2a851266582e49c88d0d5dc28638dd7b9b8b9cf4d77d60c16bfc7d5").unwrap();
+    let pk = parse_pubkey(
+        "04f86dcd9551f0f21bcda9fdbe0aa00fc4ec61fdf57c35d5f115d012841867a9d8f97fc9f54553df1a1c2ca2ecac517206df75e3dd13f775e819b18572584972f5",
+    )
+    .unwrap();
 
     let (alpha, beta) = derive_affine_constants(r1, r2, s1, s2, z1, z2).unwrap();
 
@@ -363,24 +372,40 @@ fn test_dry_run_specific_values() {
 
     let target = pk.as_affine().to_encoded_point(false).as_bytes().to_vec();
 
-    for delta in [-2i128, -1, 0, 1, 2] {
+    for delta in [
+        123_456_787i128,
+        123_456_788,
+        123_456_789,
+        123_456_790,
+        123_456_791,
+    ] {
         let d = nonce_cracker::crypto::derive_private_key(delta, alpha, beta);
-        let candidate = (ProjectivePoint::GENERATOR * d).to_affine().to_encoded_point(false).as_bytes().to_vec();
+        let candidate = (ProjectivePoint::GENERATOR * d)
+            .to_affine()
+            .to_encoded_point(false)
+            .as_bytes()
+            .to_vec();
         println!("delta={} matches target: {}", delta, candidate == target);
     }
 }
 
 #[test]
 fn test_dry_run_algebraic_delta() {
-    use nonce_cracker::crypto::{derive_affine_constants, parse_scalar};
     use k256::elliptic_curve::PrimeField;
+    use nonce_cracker::crypto::{derive_affine_constants, parse_scalar};
 
-    let r1 = parse_scalar("0x59b220002f5dc107d18dd0152d7936f99368d85951b0234a7060847f6057e584").unwrap();
-    let s1 = parse_scalar("0xa7fa8b4a2944338eee5180dbee8e763334c9c09c5f6450c8e08150714e3bd81b").unwrap();
-    let z1 = parse_scalar("0x585e5a8c07383473109d225e68d210b5bc791f870357bf1c61fb5dbf6578740e").unwrap();
-    let r2 = parse_scalar("0x9b6debb986dbb835943987c859a3e81e93438393a367b58d8d539dba872fa954").unwrap();
-    let s2 = parse_scalar("0x7999704e31ccda0c3c6f2f34e028bbcbd1de65de33d02142eb241768bb5e8fea").unwrap();
-    let z2 = parse_scalar("0x7b2e9d83f2a851266582e49c88d0d5dc28638dd7b9b8b9cf4d77d60c16bfc7d5").unwrap();
+    let r1 =
+        parse_scalar("0x59b220002f5dc107d18dd0152d7936f99368d85951b0234a7060847f6057e584").unwrap();
+    let s1 =
+        parse_scalar("0xa7fa8b4a2944338eee5180dbee8e763334c9c09c5f6450c8e08150714e3bd81b").unwrap();
+    let z1 =
+        parse_scalar("0x585e5a8c07383473109d225e68d210b5bc791f870357bf1c61fb5dbf6578740e").unwrap();
+    let r2 =
+        parse_scalar("0x9b6debb986dbb835943987c859a3e81e93438393a367b58d8d539dba872fa954").unwrap();
+    let s2 =
+        parse_scalar("0x7999704e31ccda0c3c6f2f34e028bbcbd1de65de33d02142eb241768bb5e8fea").unwrap();
+    let z2 =
+        parse_scalar("0x7b2e9d83f2a851266582e49c88d0d5dc28638dd7b9b8b9cf4d77d60c16bfc7d5").unwrap();
 
     let (alpha, beta) = derive_affine_constants(r1, r2, s1, s2, z1, z2).unwrap();
 
