@@ -245,3 +245,172 @@ fn r_value_from_nonce(nonce: u64) -> Scalar {
 fn scalar_to_hex(s: &Scalar) -> String {
     format!("0x{}", hex::encode(s.to_bytes()))
 }
+
+#[test]
+fn test_batch_normalize_alpha_hex() {
+    use k256::elliptic_curve::BatchNormalize;
+
+    let alpha_bytes =
+        hex::decode("1a574f1861113593a50c7872b9a39d14251becd78cb2d5656588ff49aeb862e2").unwrap();
+    let mut arr = [0u8; 32];
+    arr.copy_from_slice(&alpha_bytes);
+    let alpha = Scalar::from_repr(arr.into()).unwrap();
+    let step_point = ProjectivePoint::GENERATOR * alpha;
+
+    println!(
+        "alpha from hex, step_point is identity: {}",
+        step_point == ProjectivePoint::IDENTITY
+    );
+    let pair = vec![ProjectivePoint::IDENTITY, step_point];
+    println!("Testing [IDENTITY, step_point from hex alpha]...");
+    let _affines = ProjectivePoint::batch_normalize(pair.as_slice());
+    println!("OK");
+}
+
+#[test]
+fn test_alpha_comparison() {
+    use nonce_cracker::crypto::{derive_affine_constants, parse_scalar};
+
+    let r1 =
+        parse_scalar("0x59b220002f5dc107d18dd0152d7936f99368d85951b0234a7060847f6057e584").unwrap();
+    let s1 =
+        parse_scalar("0xa7fa8b4a2944338eee5180dbee8e763334c9c09c5f6450c8e08150714e3bd81b").unwrap();
+    let z1 =
+        parse_scalar("0x585e5a8c07383473109d225e68d210b5bc791f870357bf1c61fb5dbf6578740e").unwrap();
+    let r2 =
+        parse_scalar("0x9b6debb986dbb835943987c859a3e81e93438393a367b58d8d539dba872fa954").unwrap();
+    let s2 =
+        parse_scalar("0x7999704e31ccda0c3c6f2f34e028bbcbd1de65de33d02142eb241768bb5e8fea").unwrap();
+    let z2 =
+        parse_scalar("0x7b2e9d83f2a851266582e49c88d0d5dc28638dd7b9b8b9cf4d77d60c16bfc7d5").unwrap();
+
+    let (alpha_derived, _) = derive_affine_constants(r1, r2, s1, s2, z1, z2).unwrap();
+
+    let alpha_bytes =
+        hex::decode("1a574f1861113593a50c7872b9a39d14251becd78cb2d5656588ff49aeb862e2").unwrap();
+    let mut arr = [0u8; 32];
+    arr.copy_from_slice(&alpha_bytes);
+    let alpha_hex = Scalar::from_repr(arr.into()).unwrap();
+
+    println!(
+        "alpha_derived bytes: {}",
+        hex::encode(alpha_derived.to_bytes())
+    );
+    println!("alpha_hex bytes:     {}", hex::encode(alpha_hex.to_bytes()));
+    println!("alphas equal: {}", alpha_derived == alpha_hex);
+
+    let step_derived = ProjectivePoint::GENERATOR * alpha_derived;
+    let step_hex = ProjectivePoint::GENERATOR * alpha_hex;
+
+    println!("step_derived == step_hex: {}", step_derived == step_hex);
+
+    use k256::elliptic_curve::BatchNormalize;
+    let pair = vec![ProjectivePoint::IDENTITY, step_derived];
+    let _affines = ProjectivePoint::batch_normalize(pair.as_slice());
+    println!("step_derived batch OK");
+}
+
+#[test]
+fn test_identity_plus_step() {
+    use k256::elliptic_curve::BatchNormalize;
+    use nonce_cracker::crypto::{derive_affine_constants, parse_scalar};
+
+    let r1 =
+        parse_scalar("0x59b220002f5dc107d18dd0152d7936f99368d85951b0234a7060847f6057e584").unwrap();
+    let s1 =
+        parse_scalar("0xa7fa8b4a2944338eee5180dbee8e763334c9c09c5f6450c8e08150714e3bd81b").unwrap();
+    let z1 =
+        parse_scalar("0x585e5a8c07383473109d225e68d210b5bc791f870357bf1c61fb5dbf6578740e").unwrap();
+    let r2 =
+        parse_scalar("0x9b6debb986dbb835943987c859a3e81e93438393a367b58d8d539dba872fa954").unwrap();
+    let s2 =
+        parse_scalar("0x7999704e31ccda0c3c6f2f34e028bbcbd1de65de33d02142eb241768bb5e8fea").unwrap();
+    let z2 =
+        parse_scalar("0x7b2e9d83f2a851266582e49c88d0d5dc28638dd7b9b8b9cf4d77d60c16bfc7d5").unwrap();
+
+    let (alpha, _) = derive_affine_constants(r1, r2, s1, s2, z1, z2).unwrap();
+    let step_point = ProjectivePoint::GENERATOR * alpha;
+
+    let identity_plus_step = ProjectivePoint::IDENTITY + step_point;
+    println!(
+        "identity_plus_step == step_point: {}",
+        identity_plus_step == step_point
+    );
+
+    let pair = vec![ProjectivePoint::IDENTITY, identity_plus_step];
+    println!("Testing [IDENTITY, IDENTITY + step_point]...");
+    let _affines = ProjectivePoint::batch_normalize(pair.as_slice());
+    println!("OK");
+}
+
+#[test]
+fn test_dry_run_specific_values() {
+    use nonce_cracker::crypto::{derive_affine_constants, parse_scalar, parse_pubkey, scalar_hex};
+    use k256::elliptic_curve::sec1::ToEncodedPoint;
+
+    let r1 = parse_scalar("0x59b220002f5dc107d18dd0152d7936f99368d85951b0234a7060847f6057e584").unwrap();
+    let s1 = parse_scalar("0xa7fa8b4a2944338eee5180dbee8e763334c9c09c5f6450c8e08150714e3bd81b").unwrap();
+    let z1 = parse_scalar("0x585e5a8c07383473109d225e68d210b5bc791f870357bf1c61fb5dbf6578740e").unwrap();
+    let r2 = parse_scalar("0x9b6debb986dbb835943987c859a3e81e93438393a367b58d8d539dba872fa954").unwrap();
+    let s2 = parse_scalar("0x7999704e31ccda0c3c6f2f34e028bbcbd1de65de33d02142eb241768bb5e8fea").unwrap();
+    let z2 = parse_scalar("0x7b2e9d83f2a851266582e49c88d0d5dc28638dd7b9b8b9cf4d77d60c16bfc7d5").unwrap();
+    let pk = parse_pubkey("04ed6f036f0d2a2813ed34d506ddd431e3633a767091e5272b6a0998eaf409666c1432e37b21709b4ddc5ae9efe7b583aaf44fc8e464881d3501d826457b2d40e9").unwrap();
+
+    let (alpha, beta) = derive_affine_constants(r1, r2, s1, s2, z1, z2).unwrap();
+
+    println!("alpha: 0x{}", scalar_hex(&alpha));
+    println!("beta:  0x{}", scalar_hex(&beta));
+
+    let target = pk.as_affine().to_encoded_point(false).as_bytes().to_vec();
+
+    for delta in [-2i128, -1, 0, 1, 2] {
+        let d = nonce_cracker::crypto::derive_private_key(delta, alpha, beta);
+        let candidate = (ProjectivePoint::GENERATOR * d).to_affine().to_encoded_point(false).as_bytes().to_vec();
+        println!("delta={} matches target: {}", delta, candidate == target);
+    }
+}
+
+#[test]
+fn test_dry_run_algebraic_delta() {
+    use nonce_cracker::crypto::{derive_affine_constants, parse_scalar};
+    use k256::elliptic_curve::PrimeField;
+
+    let r1 = parse_scalar("0x59b220002f5dc107d18dd0152d7936f99368d85951b0234a7060847f6057e584").unwrap();
+    let s1 = parse_scalar("0xa7fa8b4a2944338eee5180dbee8e763334c9c09c5f6450c8e08150714e3bd81b").unwrap();
+    let z1 = parse_scalar("0x585e5a8c07383473109d225e68d210b5bc791f870357bf1c61fb5dbf6578740e").unwrap();
+    let r2 = parse_scalar("0x9b6debb986dbb835943987c859a3e81e93438393a367b58d8d539dba872fa954").unwrap();
+    let s2 = parse_scalar("0x7999704e31ccda0c3c6f2f34e028bbcbd1de65de33d02142eb241768bb5e8fea").unwrap();
+    let z2 = parse_scalar("0x7b2e9d83f2a851266582e49c88d0d5dc28638dd7b9b8b9cf4d77d60c16bfc7d5").unwrap();
+
+    let (alpha, beta) = derive_affine_constants(r1, r2, s1, s2, z1, z2).unwrap();
+
+    // k1 = (z1 + r1*d) / s1, k2 = (z2 + r2*d) / s2, d = alpha*delta + beta
+    // k2 - k1 = delta  =>  solve for delta algebraically
+    let s1_inv = s1.invert().unwrap();
+    let s2_inv = s2.invert().unwrap();
+
+    // A = alpha*(r2/s2 - r1/s1)
+    let a_term = alpha * (r2 * s2_inv - r1 * s1_inv);
+
+    // B = (z2 + r2*beta)/s2 - (z1 + r1*beta)/s1
+    let b_term = (z2 + r2 * beta) * s2_inv - (z1 + r1 * beta) * s1_inv;
+
+    println!("a_term: 0x{}", hex::encode(a_term.to_bytes()));
+    println!("b_term: 0x{}", hex::encode(b_term.to_bytes()));
+
+    // delta = -B / (A - 1)  =  -B * (A - 1)^{-1}
+    let denom = a_term - Scalar::from(1u64);
+    println!("denom:  0x{}", hex::encode(denom.to_bytes()));
+
+    let denom_inv = denom.invert();
+    if denom_inv.is_some().into() {
+        let delta_scalar = -b_term * denom_inv.unwrap();
+        println!("delta (scalar): 0x{}", hex::encode(delta_scalar.to_bytes()));
+
+        // Convert delta_scalar to i64. Since Scalar wraps mod n, we need to check if it's < n/2.
+        let delta_bytes = delta_scalar.to_bytes();
+        println!("delta bytes: {:?}", delta_bytes);
+    } else {
+        println!("denom is not invertible!");
+    }
+}
