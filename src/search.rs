@@ -31,8 +31,8 @@ pub fn set_shutdown() {
 /// Parameters shared by `parallel_scan` and `bsgs`.
 pub struct ScanParams {
     pub target: PublicKey,
-    pub start: i64,
-    pub step: i64,
+    pub start: i128,
+    pub step: i128,
     pub total: u128,
     pub thread_count: usize,
     pub alpha: Scalar,
@@ -45,11 +45,11 @@ pub struct ScanParams {
 /// Each thread processes a contiguous chunk of the delta range, evaluating
 /// `d(delta) = alpha * delta + beta` and comparing the resulting public key
 /// against the target using projective point equality (no field inversion).
-pub fn parallel_scan(scan: &ScanParams) -> Result<Option<i64>> {
+pub fn parallel_scan(scan: &ScanParams) -> Result<Option<i128>> {
     let target_affine: AffinePoint = *scan.target.as_affine();
     let chunk: u128 = scan.total.div_ceil(scan.thread_count as u128);
-    let not_found = i64::MAX;
-    let result = Arc::new(std::sync::atomic::AtomicI64::new(not_found));
+    let found_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let result = Arc::new(std::sync::Mutex::new(None::<i128>));
 
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(scan.thread_count)
@@ -60,7 +60,7 @@ pub fn parallel_scan(scan: &ScanParams) -> Result<Option<i64>> {
         (0..scan.thread_count)
             .into_par_iter()
             .for_each(|thread_id| {
-                if shutdown() {
+                if shutdown() || found_flag.load(Ordering::Acquire) {
                     return;
                 }
                 let chunk_start = thread_id as u128 * chunk;
@@ -72,28 +72,21 @@ pub fn parallel_scan(scan: &ScanParams) -> Result<Option<i64>> {
                 let Ok(chunk_start_i128) = i128::try_from(chunk_start) else {
                     return;
                 };
-                let start_delta = i128::from(scan.start) + chunk_start_i128 * i128::from(scan.step);
-                let Ok(mut d0) = i64::try_from(start_delta) else {
-                    return;
-                };
+                let mut d0 = scan.start + chunk_start_i128 * scan.step;
                 let mut point =
                     ProjectivePoint::GENERATOR * derive_private_key(d0, scan.alpha, scan.beta);
 
                 let mut i = 0u128;
                 while i < count {
-                    if shutdown() || result.load(Ordering::Acquire) != not_found {
+                    if shutdown() || found_flag.load(Ordering::Acquire) {
                         break;
                     }
                     let batch_end = (i + PARALLEL_BATCH).min(count);
                     let mut found = false;
                     for _ in i..batch_end {
                         if point == target_affine {
-                            let _ = result.compare_exchange(
-                                not_found,
-                                d0,
-                                Ordering::SeqCst,
-                                Ordering::Relaxed,
-                            );
+                            found_flag.store(true, Ordering::SeqCst);
+                            *result.lock().unwrap() = Some(d0);
                             found = true;
                             break;
                         }
@@ -108,12 +101,8 @@ pub fn parallel_scan(scan: &ScanParams) -> Result<Option<i64>> {
             });
     });
 
-    let found = result.load(Ordering::SeqCst);
-    if found == not_found {
-        Ok(None)
-    } else {
-        Ok(Some(found))
-    }
+    let lock = result.lock().unwrap();
+    Ok(*lock)
 }
 
 /// Baby-Step Giant-Step (BSGS) search with automatic segmentation for very
@@ -127,7 +116,7 @@ pub fn parallel_scan(scan: &ScanParams) -> Result<Option<i64>> {
 ///   `O(BSGS_MAX_M)`.
 ///
 /// `total` must fit in `u128` (guaranteed by the caller).
-pub fn bsgs(scan: &ScanParams) -> Result<Option<i64>> {
+pub fn bsgs(scan: &ScanParams) -> Result<Option<i128>> {
     let target_affine: AffinePoint = *scan.target.as_affine();
     let d0_scalar = derive_private_key(scan.start, scan.alpha, scan.beta);
     let d0_point = ProjectivePoint::GENERATOR * d0_scalar;
@@ -249,8 +238,8 @@ struct GiantStepParams<'a> {
     total: u128,
     thread_count: usize,
     step_point: ProjectivePoint,
-    start: i64,
-    step: i64,
+    start: i128,
+    step: i128,
     baby_map: &'a FxHashMap<[u8; 33], u128>,
     pool: &'a rayon::ThreadPool,
 }
@@ -259,7 +248,7 @@ struct GiantStepParams<'a> {
 ///
 /// Splits the `m` giant steps across worker threads and checks each batch
 /// against the supplied `baby_map`.
-fn run_giant_steps(p: &GiantStepParams<'_>) -> Option<i64> {
+fn run_giant_steps(p: &GiantStepParams<'_>) -> Option<i128> {
     let m_scalar = Scalar::from(p.m);
     let m_step = p.step_point * m_scalar;
 
@@ -351,7 +340,7 @@ fn run_giant_steps(p: &GiantStepParams<'_>) -> Option<i64> {
 
 /// Reconstruct the exact delta after the parallel giant-step phase signals a
 /// match.
-fn reconstruct_delta(p: &GiantStepParams<'_>) -> Option<i64> {
+fn reconstruct_delta(p: &GiantStepParams<'_>) -> Option<i128> {
     warn!("BSGS match detected; reconstructing exact delta");
     for k in 0..p.m {
         if shutdown() {
@@ -370,10 +359,7 @@ fn reconstruct_delta(p: &GiantStepParams<'_>) -> Option<i64> {
                 let Ok(candidate_i128) = i128::try_from(candidate) else {
                     continue;
                 };
-                let delta_i128 = i128::from(p.start) + candidate_i128 * i128::from(p.step);
-                if let Ok(delta) = i64::try_from(delta_i128) {
-                    return Some(delta);
-                }
+                return Some(p.start + candidate_i128 * p.step);
             }
         }
     }
@@ -415,7 +401,11 @@ fn build_baby_steps(
                 points.reserve(batch_size);
 
                 for _ in 0..batch_size {
-                    points.push(current);
+                    if current == ProjectivePoint::IDENTITY {
+                        points.push(ProjectivePoint::IDENTITY);
+                    } else {
+                        points.push(current);
+                    }
                     current += step_point;
                 }
 
@@ -468,7 +458,16 @@ fn build_baby_steps_segment(
 
             let abs_start = seg_start + start_j;
             let abs_end = seg_start + end_j;
-            let mut j = abs_start;
+
+            // Handle j=0 specially: scalar multiplication by zero may return a
+            // projective point with a non-canonical z=0 representation that
+            // batch_normalize cannot invert, even though the point is equal to
+            // IDENTITY.  See https://github.com/RustCrypto/elliptic-curves/issues/XXX
+            if abs_start == 0 {
+                map.insert(IDENTITY_KEY, 0);
+            }
+
+            let mut j = if abs_start == 0 { 1 } else { abs_start };
             let mut current = step_point * Scalar::from(u64::try_from(j).expect("j fits in u64"));
             let mut points =
                 Vec::with_capacity(usize::try_from(BATCH).expect("BATCH fits in usize"));
@@ -480,7 +479,13 @@ fn build_baby_steps_segment(
                 points.reserve(batch_size);
 
                 for _ in 0..batch_size {
-                    points.push(current);
+                    // Canonicalize any identity point produced by the arithmetic
+                    // so batch_normalize does not trip over a non-canonical z=0.
+                    if current == ProjectivePoint::IDENTITY {
+                        points.push(ProjectivePoint::IDENTITY);
+                    } else {
+                        points.push(current);
+                    }
                     current += step_point;
                 }
 

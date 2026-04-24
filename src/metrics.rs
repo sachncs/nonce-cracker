@@ -15,7 +15,7 @@ impl SearchMetrics {
         }
     }
 
-    pub fn report(&self, found: bool, delta: Option<i64>) {
+    pub fn report(&self, found: bool, delta: Option<i128>) {
         let elapsed = self.start.elapsed().as_secs_f64();
         info!(
             target: "nonce-cracker::metrics",
@@ -32,6 +32,6 @@ pub fn search_started(threads: usize) -> SearchMetrics {
     SearchMetrics::new(threads)
 }
 
-pub fn search_completed(m: &SearchMetrics, found: bool, delta: Option<i64>) {
+pub fn search_completed(m: &SearchMetrics, found: bool, delta: Option<i128>) {
     m.report(found, delta);
 }

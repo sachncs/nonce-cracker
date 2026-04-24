@@ -173,9 +173,9 @@ struct SearchParams {
     z1: Scalar,
     z2: Scalar,
     target: PublicKey,
-    start: i64,
-    end: i64,
-    step: i64,
+    start: i128,
+    end: i128,
+    step: i128,
     threads: Option<usize>,
     quiet: bool,
     outfile: String,
@@ -220,15 +220,15 @@ fn search(params: &SearchParams) -> Result<()> {
     writeln!(log, "alpha: 0x{}", scalar_hex(&alpha))?;
     writeln!(log, "beta:  0x{}", scalar_hex(&beta))?;
 
-    let step_scalar = alpha * Scalar::from(params.step.unsigned_abs());
+    let step_scalar = alpha * Scalar::from(params.step as u128);
     let step_point = ProjectivePoint::GENERATOR * step_scalar;
     let target_affine: AffinePoint = *params.target.as_affine();
 
-    let span = i128::from(params.end)
-        .checked_sub(i128::from(params.start))
+    let span = params
+        .end
+        .checked_sub(params.start)
         .ok_or_else(|| Error("range overflow".into()))?;
-    let step_i128 = i128::from(params.step);
-    let total: u128 = (span / step_i128 + 1)
+    let total: u128 = (span / params.step + 1)
         .try_into()
         .map_err(|_| Error("range too large".into()))?;
 
@@ -340,6 +340,15 @@ mod tests {
     use super::*;
     use k256::elliptic_curve::{sec1::ToEncodedPoint, PrimeField};
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn test_batch_normalize_identity() {
+        use k256::elliptic_curve::BatchNormalize;
+        let identity = ProjectivePoint::IDENTITY;
+        let gen = ProjectivePoint::GENERATOR;
+        let points = vec![identity, gen, identity];
+        let _affines = ProjectivePoint::batch_normalize(points.as_slice());
+    }
 
     #[test]
     fn test_unique_log_path() {
