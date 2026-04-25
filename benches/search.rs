@@ -1,3 +1,17 @@
+//! Criterion benchmarks for core cryptographic and search operations.
+//!
+//! Covers scalar inversion, affine-constant derivation, candidate-key
+//! computation, point multiplication, and chunked search throughput.
+//!
+//! ## Running
+//!
+//! ```bash
+//! cargo bench
+//! ```
+//!
+//! Results are written to `target/criterion/` and can be viewed by opening
+//! `target/criterion/report/index.html`.
+
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use k256::{elliptic_curve::PrimeField, ProjectivePoint, Scalar};
 
@@ -19,7 +33,7 @@ fn derive_affine_constants(
     Some((alpha, beta))
 }
 
-#[inline(always)]
+#[inline]
 fn derive_private_key(delta: i64, alpha: Scalar, beta: Scalar) -> Scalar {
     let delta_scalar = Scalar::from(delta.unsigned_abs());
     if delta < 0 {
@@ -30,7 +44,7 @@ fn derive_private_key(delta: i64, alpha: Scalar, beta: Scalar) -> Scalar {
 }
 
 fn bench_scalar_invert(c: &mut Criterion) {
-    let scalar = Scalar::from(123456789u64);
+    let scalar = Scalar::from(123_456_789_u64);
     c.bench_function("scalar_invert", |b| {
         b.iter(|| black_box(&scalar).invert());
     });
@@ -74,7 +88,7 @@ fn bench_scalar_operations(c: &mut Criterion) {
 }
 
 fn bench_point_multiplication(c: &mut Criterion) {
-    let scalar = Scalar::from(1234567890u64);
+    let scalar = Scalar::from(1_234_567_890_u64);
     c.bench_function("point_multiplication", |b| {
         b.iter(|| ProjectivePoint::GENERATOR * black_box(scalar));
     });
@@ -83,7 +97,7 @@ fn bench_point_multiplication(c: &mut Criterion) {
 fn bench_search_chunk(c: &mut Criterion) {
     let mut group = c.benchmark_group("search_chunk");
 
-    for size in &[1000u64, 10000, 100000] {
+    for size in &[1_000_u64, 10_000, 100_000] {
         group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, &size| {
             let alpha = parse_scalar_hex(
                 "a7fa8b4a2944338eee5180dbee8e763334c9c09c5f6450c8e08150714e3bd81b",
