@@ -255,7 +255,7 @@ fn resolve_path(base_dir: &Path, p: &str) -> Result<std::path::PathBuf> {
         return Err(Error::Range(RangeError::EmptyOutfile));
     }
     let path = std::path::Path::new(p);
-    if path.is_absolute() {
+    if path.is_absolute() || p.starts_with('/') {
         return Ok(path.to_path_buf());
     }
     if p == "search.log" {

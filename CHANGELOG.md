@@ -30,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Corrected import of `BatchNormalize` trait to resolve `batch_normalize` usage.
 - Handled identity point explicitly in BSGS to prevent `batch_normalize` panic on zero-Z coordinates.
+- Fixed `resolve_path` to recognize Unix-style absolute paths (`/path`) on Windows via `p.starts_with('/')` check.
 
 ## [0.2.0] - 2026-04-10
 
