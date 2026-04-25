@@ -40,9 +40,9 @@ doc:
 
 doc-open: doc
 	@case "$$OSTYPE" in \
-		darwin*) open target/doc/nonce_crate/index.html ;; \
-		linux*) xdg-open target/doc/nonce_crate/index.html ;; \
-		*) echo "Open target/doc/nonce_crate/index.html manually" ;; \
+		darwin*) open target/doc/nonce_cracker/index.html ;; \
+		linux*) xdg-open target/doc/nonce_cracker/index.html ;; \
+		*) echo "Open target/doc/nonce_cracker/index.html manually" ;; \
 	esac
 
 ## Benchmarking

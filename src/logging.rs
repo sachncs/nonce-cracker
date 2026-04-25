@@ -1,57 +1,71 @@
+//! Structured logging backend using `tracing`.
+//!
+//! `init` sets up a compact-format subscriber that writes to both a rolling
+//! log file and optionally stdout.  The log directory and level are controlled
+//! via environment variables.
+//!
+//! # Environment variables
+//!
+//! | Variable | Description | Default |
+//! |----------|-------------|---------|
+//! | `NONCE_CRACKER_LOG_LEVEL` | Minimum level (`error`..`trace`) | `info` |
+//! | `NONCE_CRACKER_LOG_CONSOLE` | Mirror logs to stdout (`1`/`true`) | `true` |
+
 use std::{
     fmt,
     fs::File,
     io::{self, Write},
-    path::PathBuf,
-    sync::OnceLock,
+    path::Path,
 };
-use tracing::{level_filters::LevelFilter, Level};
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+use tracing::Level;
+use tracing_subscriber::{
+    filter::LevelFilter, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter,
+};
 
 const DEFAULT_LOG_FILE: &str = "nonce-cracker.log";
 
-static LOG_DIR: OnceLock<PathBuf> = OnceLock::new();
-
-#[derive(Debug)]
+/// Errors that can occur while setting up the logging subsystem.
+#[derive(Debug, thiserror::Error)]
 pub enum LoggingError {
-    Level(String),
+    /// The supplied level string was not recognised.
+    #[error("invalid log level: {0}")]
+    InvalidLevel(String),
+    /// The log file could not be opened or cloned.
+    #[error("logger initialization failed: {0}")]
     Logger(String),
 }
 
-impl fmt::Display for LoggingError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Level(s) => write!(f, "log level: {s}"),
-            Self::Logger(s) => write!(f, "logger: {s}"),
-        }
-    }
-}
-impl std::error::Error for LoggingError {}
-
-pub fn init() -> Result<(), LoggingError> {
-    let dir = crate::config::Config::get().log_dir.clone();
-
+/// Initialise the global tracing subscriber.
+///
+/// The subscriber writes a rolling compact-format log to
+/// `<log_dir>/nonce-cracker.log`.  Optionally mirrors output to stdout.
+///
+/// # Errors
+///
+/// Returns [`LoggingError::InvalidLevel`] if `NONCE_CRACKER_LOG_LEVEL` is set to
+/// an unrecognised value, or [`LoggingError::Logger`] if the log file cannot be
+/// opened or cloned.
+///
+/// # Panics
+///
+/// Panics if the log file handle cannot be cloned for the tracing layer
+/// writer.  This only occurs for invalid file descriptors.
+pub fn init(log_dir: &Path, console: bool) -> Result<(), LoggingError> {
     let level = match std::env::var("NONCE_CRACKER_LOG_LEVEL") {
         Ok(v) => parse_level(&v)?,
         Err(_) => LevelFilter::INFO,
     };
 
-    let console = std::env::var("NONCE_CRACKER_LOG_CONSOLE")
-        .map(|v| v == "1" || v == "true")
-        .unwrap_or(true);
-
     let env_filter =
         EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(level.to_string()));
 
-    let log_path = dir.join(DEFAULT_LOG_FILE);
+    let log_path = log_dir.join(DEFAULT_LOG_FILE);
     let file = File::options()
         .create(true)
         .append(true)
         .open(&log_path)
         .map_err(|e| LoggingError::Logger(e.to_string()))?;
 
-    // Pre-validate that the file handle can be cloned; subsequent clones
-    // inside the tracing closure should not fail in practice.
     let _ = file
         .try_clone()
         .map_err(|e| LoggingError::Logger(format!("clone log file: {e}")))?;
@@ -71,33 +85,38 @@ pub fn init() -> Result<(), LoggingError> {
         subscriber.with(fmt_layer).init();
     }
 
-    let _ = LOG_DIR.set(dir);
     tracing::info!("logging initialized");
     Ok(())
 }
 
-pub fn log_dir() -> PathBuf {
-    LOG_DIR
-        .get()
-        .cloned()
-        .unwrap_or_else(|| crate::config::Config::get().log_dir.clone())
-}
-
+/// Emit a single summary line at the given level, and optionally write it to
+/// stdout regardless of whether the tracing subscriber is configured.
+///
+/// This is used to report the final search result so it is visible even when
+/// console logging is disabled.
 pub fn emit_summary(level: Level, message: impl fmt::Display, console: bool) {
-    let line = message.to_string();
     match level {
-        Level::ERROR => tracing::error!("{line}"),
-        Level::WARN => tracing::warn!("{line}"),
-        Level::INFO => tracing::info!("{line}"),
-        Level::DEBUG => tracing::debug!("{line}"),
-        Level::TRACE => tracing::trace!("{line}"),
+        Level::ERROR => tracing::error!("{message}"),
+        Level::WARN => tracing::warn!("{message}"),
+        Level::INFO => tracing::info!("{message}"),
+        Level::DEBUG => tracing::debug!("{message}"),
+        Level::TRACE => tracing::trace!("{message}"),
     }
     if console {
-        let _ = writeln!(io::stdout().lock(), "{line}");
+        let _ = writeln!(io::stdout().lock(), "{message}");
     }
 }
 
-fn parse_level(value: &str) -> Result<LevelFilter, LoggingError> {
+/// Parse a level string into a [`LevelFilter`].
+///
+/// Accepts `off`, `error`, `warn`/`warning`, `info`, `debug`, `trace` (case
+/// insensitive, leading and trailing whitespace ignored).
+///
+/// # Errors
+///
+/// Returns [`LoggingError::InvalidLevel`] if the string does not match a known
+/// level.
+pub fn parse_level(value: &str) -> Result<LevelFilter, LoggingError> {
     match value.trim().to_ascii_lowercase().as_str() {
         "off" => Ok(LevelFilter::OFF),
         "error" => Ok(LevelFilter::ERROR),
@@ -105,6 +124,39 @@ fn parse_level(value: &str) -> Result<LevelFilter, LoggingError> {
         "info" => Ok(LevelFilter::INFO),
         "debug" => Ok(LevelFilter::DEBUG),
         "trace" => Ok(LevelFilter::TRACE),
-        other => Err(LoggingError::Level(format!("invalid '{other}'"))),
+        other => Err(LoggingError::InvalidLevel(other.to_string())),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tracing::Level;
+
+    #[test]
+    fn test_parse_level_all_variants() {
+        assert_eq!(parse_level("off").unwrap(), LevelFilter::OFF);
+        assert_eq!(parse_level("error").unwrap(), LevelFilter::ERROR);
+        assert_eq!(parse_level("warn").unwrap(), LevelFilter::WARN);
+        assert_eq!(parse_level("warning").unwrap(), LevelFilter::WARN);
+        assert_eq!(parse_level("info").unwrap(), LevelFilter::INFO);
+        assert_eq!(parse_level("debug").unwrap(), LevelFilter::DEBUG);
+        assert_eq!(parse_level("trace").unwrap(), LevelFilter::TRACE);
+        assert_eq!(parse_level("  INFO  ").unwrap(), LevelFilter::INFO);
+    }
+
+    #[test]
+    fn test_parse_level_invalid() {
+        let err = parse_level("invalid").unwrap_err();
+        assert!(err.to_string().contains("invalid"));
+    }
+
+    #[test]
+    fn test_emit_summary_all_levels() {
+        emit_summary(Level::ERROR, "error msg", false);
+        emit_summary(Level::WARN, "warn msg", false);
+        emit_summary(Level::INFO, "info msg", false);
+        emit_summary(Level::DEBUG, "debug msg", false);
+        emit_summary(Level::TRACE, "trace msg", false);
     }
 }

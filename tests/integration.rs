@@ -1,3 +1,9 @@
+//! End-to-end CLI integration tests.
+//!
+//! Covers the `example` and `run` subcommands, argument validation,
+//! logging behaviour, signed delta ranges, and dry-run cryptographic
+//! correctness checks.
+
 use assert_cmd::Command;
 use k256::{
     elliptic_curve::{sec1::ToEncodedPoint, PrimeField},
@@ -247,6 +253,59 @@ fn scalar_to_hex(s: &Scalar) -> String {
 }
 
 #[test]
+fn test_invalid_max_threads() {
+    let output = Command::cargo_bin("nonce-cracker")
+        .expect("Binary should be built")
+        .env("NONCE_CRACKER_MAX_THREADS", "0")
+        .args(["example"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("config"));
+    assert!(stderr.contains("NONCE_CRACKER_MAX_THREADS"));
+}
+
+#[test]
+fn test_invalid_log_level() {
+    let output = Command::cargo_bin("nonce-cracker")
+        .expect("Binary should be built")
+        .env("NONCE_CRACKER_LOG_LEVEL", "invalid")
+        .args(["example"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("logging"));
+    assert!(stderr.contains("invalid"));
+}
+
+#[test]
+fn test_no_console_logging() {
+    let log_dir = temp_log_dir("nonce_cracker_no_console");
+    let output = Command::cargo_bin("nonce-cracker")
+        .expect("Binary should be built")
+        .env("NONCE_CRACKER_LOG_DIR", &log_dir)
+        .env("NONCE_CRACKER_LOG_CONSOLE", "false")
+        .env("NONCE_CRACKER_LOG_LEVEL", "debug")
+        .args(["example"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // tracing logs should not appear on stdout when console is disabled
+    assert!(!stdout.contains("logging initialized"));
+
+    let app_log = std::fs::read_to_string(log_dir.join("nonce-cracker.log"))
+        .expect("application log should be written");
+    assert!(app_log.contains("logging initialized"));
+    assert!(app_log.contains("event=search_result"));
+}
+
+#[test]
 fn test_batch_normalize_alpha_hex() {
     use k256::elliptic_curve::BatchNormalize;
 
@@ -269,7 +328,9 @@ fn test_batch_normalize_alpha_hex() {
 
 #[test]
 fn test_alpha_comparison() {
-    use nonce_cracker::crypto::{derive_affine_constants, parse_scalar};
+    use k256::elliptic_curve::BatchNormalize;
+    use nonce_cracker::{derive_affine_constants, parse_scalar};
+    use nonce_cracker::{Signature, SignaturePair};
 
     let r1 =
         parse_scalar("0x59b220002f5dc107d18dd0152d7936f99368d85951b0234a7060847f6057e584").unwrap();
@@ -284,7 +345,8 @@ fn test_alpha_comparison() {
     let z2 =
         parse_scalar("0x7b2e9d83f2a851266582e49c88d0d5dc28638dd7b9b8b9cf4d77d60c16bfc7d5").unwrap();
 
-    let (alpha_derived, _) = derive_affine_constants(r1, r2, s1, s2, z1, z2).unwrap();
+    let pair = SignaturePair::new(Signature::new(r1, s1, z1), Signature::new(r2, s2, z2));
+    let (alpha_derived, _) = derive_affine_constants(&pair).unwrap();
 
     let alpha_bytes =
         hex::decode("1a574f1861113593a50c7872b9a39d14251becd78cb2d5656588ff49aeb862e2").unwrap();
@@ -304,7 +366,6 @@ fn test_alpha_comparison() {
 
     println!("step_derived == step_hex: {}", step_derived == step_hex);
 
-    use k256::elliptic_curve::BatchNormalize;
     let pair = vec![ProjectivePoint::IDENTITY, step_derived];
     let _affines = ProjectivePoint::batch_normalize(pair.as_slice());
     println!("step_derived batch OK");
@@ -313,7 +374,8 @@ fn test_alpha_comparison() {
 #[test]
 fn test_identity_plus_step() {
     use k256::elliptic_curve::BatchNormalize;
-    use nonce_cracker::crypto::{derive_affine_constants, parse_scalar};
+    use nonce_cracker::{derive_affine_constants, parse_scalar};
+    use nonce_cracker::{Signature, SignaturePair};
 
     let r1 =
         parse_scalar("0x59b220002f5dc107d18dd0152d7936f99368d85951b0234a7060847f6057e584").unwrap();
@@ -328,7 +390,8 @@ fn test_identity_plus_step() {
     let z2 =
         parse_scalar("0x7b2e9d83f2a851266582e49c88d0d5dc28638dd7b9b8b9cf4d77d60c16bfc7d5").unwrap();
 
-    let (alpha, _) = derive_affine_constants(r1, r2, s1, s2, z1, z2).unwrap();
+    let pair = SignaturePair::new(Signature::new(r1, s1, z1), Signature::new(r2, s2, z2));
+    let (alpha, _) = derive_affine_constants(&pair).unwrap();
     let step_point = ProjectivePoint::GENERATOR * alpha;
 
     let identity_plus_step = ProjectivePoint::IDENTITY + step_point;
@@ -346,7 +409,8 @@ fn test_identity_plus_step() {
 #[test]
 fn test_dry_run_specific_values() {
     use k256::elliptic_curve::sec1::ToEncodedPoint;
-    use nonce_cracker::crypto::{derive_affine_constants, parse_pubkey, parse_scalar, scalar_hex};
+    use nonce_cracker::{derive_affine_constants, parse_pubkey, parse_scalar, scalar_hex};
+    use nonce_cracker::{Signature, SignaturePair};
 
     let r1 =
         parse_scalar("0x59b220002f5dc107d18dd0152d7936f99368d85951b0234a7060847f6057e584").unwrap();
@@ -360,12 +424,14 @@ fn test_dry_run_specific_values() {
         parse_scalar("0x7999704e31ccda0c3c6f2f34e028bbcbd1de65de33d02142eb241768bb5e8fea").unwrap();
     let z2 =
         parse_scalar("0x7b2e9d83f2a851266582e49c88d0d5dc28638dd7b9b8b9cf4d77d60c16bfc7d5").unwrap();
+
+    let pair = SignaturePair::new(Signature::new(r1, s1, z1), Signature::new(r2, s2, z2));
     let pk = parse_pubkey(
         "04f86dcd9551f0f21bcda9fdbe0aa00fc4ec61fdf57c35d5f115d012841867a9d8f97fc9f54553df1a1c2ca2ecac517206df75e3dd13f775e819b18572584972f5",
     )
     .unwrap();
 
-    let (alpha, beta) = derive_affine_constants(r1, r2, s1, s2, z1, z2).unwrap();
+    let (alpha, beta) = derive_affine_constants(&pair).unwrap();
 
     println!("alpha: 0x{}", scalar_hex(&alpha));
     println!("beta:  0x{}", scalar_hex(&beta));
@@ -379,7 +445,7 @@ fn test_dry_run_specific_values() {
         123_456_790,
         123_456_791,
     ] {
-        let d = nonce_cracker::crypto::derive_private_key(delta, alpha, beta);
+        let d = nonce_cracker::derive_private_key(delta, alpha, beta);
         let candidate = (ProjectivePoint::GENERATOR * d)
             .to_affine()
             .to_encoded_point(false)
@@ -391,8 +457,8 @@ fn test_dry_run_specific_values() {
 
 #[test]
 fn test_dry_run_algebraic_delta() {
-    use k256::elliptic_curve::PrimeField;
-    use nonce_cracker::crypto::{derive_affine_constants, parse_scalar};
+    use nonce_cracker::{derive_affine_constants, parse_scalar};
+    use nonce_cracker::{Signature, SignaturePair};
 
     let r1 =
         parse_scalar("0x59b220002f5dc107d18dd0152d7936f99368d85951b0234a7060847f6057e584").unwrap();
@@ -407,23 +473,18 @@ fn test_dry_run_algebraic_delta() {
     let z2 =
         parse_scalar("0x7b2e9d83f2a851266582e49c88d0d5dc28638dd7b9b8b9cf4d77d60c16bfc7d5").unwrap();
 
-    let (alpha, beta) = derive_affine_constants(r1, r2, s1, s2, z1, z2).unwrap();
+    let pair = SignaturePair::new(Signature::new(r1, s1, z1), Signature::new(r2, s2, z2));
+    let (alpha, beta) = derive_affine_constants(&pair).unwrap();
 
-    // k1 = (z1 + r1*d) / s1, k2 = (z2 + r2*d) / s2, d = alpha*delta + beta
-    // k2 - k1 = delta  =>  solve for delta algebraically
     let s1_inv = s1.invert().unwrap();
     let s2_inv = s2.invert().unwrap();
 
-    // A = alpha*(r2/s2 - r1/s1)
     let a_term = alpha * (r2 * s2_inv - r1 * s1_inv);
-
-    // B = (z2 + r2*beta)/s2 - (z1 + r1*beta)/s1
     let b_term = (z2 + r2 * beta) * s2_inv - (z1 + r1 * beta) * s1_inv;
 
     println!("a_term: 0x{}", hex::encode(a_term.to_bytes()));
     println!("b_term: 0x{}", hex::encode(b_term.to_bytes()));
 
-    // delta = -B / (A - 1)  =  -B * (A - 1)^{-1}
     let denom = a_term - Scalar::from(1u64);
     println!("denom:  0x{}", hex::encode(denom.to_bytes()));
 
@@ -431,10 +492,8 @@ fn test_dry_run_algebraic_delta() {
     if denom_inv.is_some().into() {
         let delta_scalar = -b_term * denom_inv.unwrap();
         println!("delta (scalar): 0x{}", hex::encode(delta_scalar.to_bytes()));
-
-        // Convert delta_scalar to i64. Since Scalar wraps mod n, we need to check if it's < n/2.
         let delta_bytes = delta_scalar.to_bytes();
-        println!("delta bytes: {:?}", delta_bytes);
+        println!("delta bytes: {delta_bytes:?}");
     } else {
         println!("denom is not invertible!");
     }
