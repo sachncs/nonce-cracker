@@ -13,9 +13,17 @@
 //! `target/criterion/report/index.html`.
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
-use k256::{ProjectivePoint, Scalar};
-use nonce_cracker::{derive_affine_constants, derive_private_key};
+use k256::{
+    elliptic_curve::{sec1::ToEncodedPoint, PrimeField},
+    ProjectivePoint, PublicKey, Scalar,
+};
+use nonce_cracker::{
+    derive_affine_constants, derive_private_key, Config, SearchEngine, ShutdownToken,
+    Signature, TracingMetricsSink,
+};
+use nonce_cracker::search::KangarooParams;
 use nonce_cracker::search::openmap::OpenMap;
+use std::sync::Arc;
 
 fn bench_scalar_invert(c: &mut Criterion) {
     let scalar = Scalar::from(123_456_789_u64);
@@ -97,8 +105,71 @@ fn bench_openmap(c: &mut Criterion) {
     group.finish();
 }
 
-// TODO: Add kangaroo vs BSGS benchmark. This requires setting up a SearchEngine
-// and ScanParams, which is complex enough to defer to a follow-up task.
+fn fixture() -> (Signature, PublicKey) {
+    let d = Scalar::from(0x3039u64);
+    let nonce = 5u64;
+    let z = Scalar::from(1u64);
+
+    let r = {
+        let enc = (ProjectivePoint::GENERATOR * Scalar::from(nonce))
+            .to_affine()
+            .to_encoded_point(true);
+        let mut b = [0u8; 32];
+        b.copy_from_slice(&enc.as_bytes()[1..33]);
+        Scalar::from_repr(b.into()).unwrap()
+    };
+    let s = (Scalar::from(1u64) + r * d) * Scalar::from(nonce).invert().unwrap();
+
+    let pk = PublicKey::from_sec1_bytes(
+        (ProjectivePoint::GENERATOR * d)
+            .to_affine()
+            .to_encoded_point(true)
+            .as_bytes(),
+    )
+    .unwrap();
+
+    (Signature::new(r, s, z), pk)
+}
+
+fn bench_kangaroo(c: &mut Criterion) {
+    let mut group = c.benchmark_group("kangaroo");
+
+    let engine = SearchEngine::new(
+        &Config {
+            max_threads: 4,
+            log_dir: std::env::temp_dir(),
+            version: "test",
+        },
+        Some(4),
+        ShutdownToken::new(),
+        Arc::new(TracingMetricsSink),
+    ).unwrap();
+    let (sig, _pk) = fixture();
+    let (alpha, beta) = derive_affine_constants(&sig).unwrap();
+    let h = ProjectivePoint::GENERATOR * Scalar::from(0x3039u64);
+
+    group.bench_function("small_range_1000", |b| {
+        let kangaroo_params = KangarooParams {
+            g: ProjectivePoint::GENERATOR,
+            h,
+            alpha,
+            beta,
+            start: 0,
+            step: 1,
+            total: 1000,
+            d: 8,
+            max_iterations: 1_000_000,
+        };
+        b.iter(|| {
+            engine.kangaroo(&kangaroo_params).unwrap();
+        });
+    });
+
+    group.finish();
+}
+
+// TODO: Add BSGS with FxHashMap vs OpenMap comparison benchmark.
+// The old FxHashMap BSGS code has been fully migrated to OpenMap.
 
 criterion_group!(
     benches,
@@ -108,5 +179,6 @@ criterion_group!(
     bench_point_multiplication,
     bench_search_chunk,
     bench_openmap,
+    bench_kangaroo,
 );
 criterion_main!(benches);
