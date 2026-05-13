@@ -384,16 +384,13 @@ fn test_kangaroo_small_range() {
 fn test_kangaroo_shutdown() {
     let (sig, pk) = fixture();
     let (alpha, beta) = derive_affine_constants(&sig).unwrap();
-    let pool = rayon::ThreadPoolBuilder::new().num_threads(4).build().unwrap();
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(4)
+        .build()
+        .unwrap();
     let shutdown = ShutdownToken::new();
     shutdown.signal();
-    let engine = SearchEngine::with_params(
-        pool,
-        4,
-        shutdown,
-        Arc::new(TracingMetricsSink),
-        50,
-    );
+    let engine = SearchEngine::with_params(pool, 4, shutdown, Arc::new(TracingMetricsSink), 50);
     let kangaroo_params = crate::search::params::KangarooParams {
         g: ProjectivePoint::GENERATOR,
         h: pk.into(),

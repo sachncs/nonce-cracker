@@ -17,12 +17,12 @@ use k256::{
     elliptic_curve::{sec1::ToEncodedPoint, PrimeField},
     ProjectivePoint, PublicKey, Scalar,
 };
-use nonce_cracker::{
-    derive_affine_constants, derive_private_key, Config, SearchEngine, ShutdownToken,
-    Signature, TracingMetricsSink,
-};
-use nonce_cracker::search::KangarooParams;
 use nonce_cracker::search::openmap::OpenMap;
+use nonce_cracker::search::KangarooParams;
+use nonce_cracker::{
+    derive_affine_constants, derive_private_key, Config, SearchEngine, ShutdownToken, Signature,
+    TracingMetricsSink,
+};
 use std::sync::Arc;
 
 fn bench_scalar_invert(c: &mut Criterion) {
@@ -143,7 +143,8 @@ fn bench_kangaroo(c: &mut Criterion) {
         Some(4),
         ShutdownToken::new(),
         Arc::new(TracingMetricsSink),
-    ).unwrap();
+    )
+    .unwrap();
     let (sig, _pk) = fixture();
     let (alpha, beta) = derive_affine_constants(&sig).unwrap();
     let h = ProjectivePoint::GENERATOR * Scalar::from(0x3039u64);

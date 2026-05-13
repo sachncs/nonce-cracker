@@ -5,11 +5,11 @@
 //! (`parallel_scan`, `bsgs`) are crate-private.
 
 mod bsgs;
+mod kangaroo;
 /// Open-addressing hash map for storing distinguished points.
 pub mod openmap;
 mod parallel;
 mod params;
-mod kangaroo;
 
 pub use params::{KangarooParams, ScanParams};
 
@@ -167,7 +167,10 @@ impl SearchEngine {
                 max_iterations: 10 * (total as f64).sqrt() as u64,
             };
             kangaroo::search(
-                &self.pool, self.thread_count, &self.shutdown, &kangaroo_params,
+                &self.pool,
+                self.thread_count,
+                &self.shutdown,
+                &kangaroo_params,
             )?
         } else {
             bsgs::search(
