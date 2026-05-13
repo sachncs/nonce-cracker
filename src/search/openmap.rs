@@ -1,16 +1,18 @@
-use rustc_hash::FxBuildHasher;
+use rustc_hash::{FxBuildHasher, FxHasher};
 use std::hash::{BuildHasher, Hash, Hasher};
 
 const EMPTY: u8 = 0;
 const OCCUPIED: u8 = 1;
 const TOMBSTONE: u8 = 2;
 
+type Entry = ([u8; 33], u128, u8);
+
 /// Open-addressing hash map with 33-byte keys and u128 values.
 ///
 /// Stores compressed elliptic curve points as keys and maps them to step
 /// indices.  Uses quadratic probing and FxHash for fast lookups.
 pub struct OpenMap {
-    entries: Vec<([u8; 33], u128, u8)>,
+    entries: Vec<Entry>,
     mask: usize,
     len: usize,
     hasher: FxBuildHasher,
@@ -22,8 +24,8 @@ impl OpenMap {
     /// The underlying table size is the next power of two large enough to
     /// keep the load factor below 0.7.
     pub fn with_capacity(capacity: usize) -> Self {
-        let cap = capacity.next_power_of_two();
-        let table_cap = (cap * 2).next_power_of_two(); // ensure < 0.7 load factor
+        let target = (capacity as f64 / 0.7).ceil() as usize;
+        let table_cap = target.next_power_of_two();
         let mut entries = Vec::with_capacity(table_cap);
         entries.resize_with(table_cap, || ([0u8; 33], 0u128, EMPTY));
         Self {
@@ -44,9 +46,10 @@ impl OpenMap {
     ///
     /// If the key already exists, its value is overwritten.
     pub fn insert(&mut self, key: [u8; 33], value: u128) {
-        let mut idx = self.hash(&key);
+        let base = self.hash(&key);
         let mut i = 0usize;
         loop {
+            let idx = (base + i * i) & self.mask;
             let entry = &mut self.entries[idx];
             if entry.2 == EMPTY || entry.2 == TOMBSTONE {
                 *entry = (key, value, OCCUPIED);
@@ -58,22 +61,21 @@ impl OpenMap {
                 return;
             }
             i += 1;
-            idx = (idx + i * i) & self.mask;
         }
     }
 
     /// Look up a key and return a reference to its value, if present.
     pub fn get(&self, key: &[u8; 33]) -> Option<&u128> {
-        let mut idx = self.hash(key);
+        let base = self.hash(key);
         let mut i = 0usize;
         loop {
+            let idx = (base + i * i) & self.mask;
             let entry = &self.entries[idx];
             match entry.2 {
                 EMPTY => return None,
                 OCCUPIED if entry.0 == *key => return Some(&entry.1),
                 _ => {
                     i += 1;
-                    idx = (idx + i * i) & self.mask;
                 }
             }
         }
