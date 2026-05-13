@@ -4,7 +4,7 @@
 
 The current BSGS implementation is memory-bound at `m = 2^26` (~5 GB). For ranges above `2^48`, segmented BSGS becomes impractical (too many segments, each rebuilt from scratch). We need:
 
-1. A memory-efficient alternative for `total > 2^48`: Pollard's rho with van Oorschot-Wiener parallel collision search.
+1. A memory-efficient alternative for `total > 2^48`: Pollard's kangaroo (lambda) method for bounded-range discrete logarithm search.
 2. A memory-optimized baby-step table for `m <= 2^27`: custom open-addressing hash map.
 
 ## Algorithm Selection Heuristic
@@ -12,7 +12,7 @@ The current BSGS implementation is memory-bound at `m = 2^26` (~5 GB). For range
 `SearchEngine::search` selects algorithms in this priority order:
 
 1. If `total <= BSGS_THRESHOLD` (2^32): use parallel scan.
-2. If `total > RHO_THRESHOLD` (2^48): use Pollard's rho.
+2. If `total > KANGAROO_THRESHOLD` (2^48): use Pollard's kangaroo.
 3. Otherwise (`2^32 < total <= 2^48`): use BSGS (in-memory or segmented).
 
 This preserves deterministic output for all ranges up to 2^48, and only uses the probabilistic algorithm for genuinely massive ranges.
@@ -39,138 +39,137 @@ This preserves deterministic output for all ranges up to 2^48, and only uses the
 - `build_baby_steps` returns `OpenMap` instead of `FxHashMap`.
 - No public API change — internal implementation only.
 
-## Component: Pollard's Rho with van Oorschot-Wiener
+## Component: Pollard's Kangaroo (Lambda Method)
 
 ### Algorithm Overview
 
-Parallel collision search for discrete logarithm. This design incorporates the **negation map optimization** from Bernstein-Lange-Schwabe (2011) and **branchless iteration** techniques from modern GPU implementations.
+Pollard's kangaroo is a memory-efficient algorithm for **bounded-range** discrete logarithm search. Unlike Pollard's rho (which searches the full group), kangaroo is designed for cases where the discrete log is known to lie in a bounded interval `[a, a + N]`. Expected runtime is `O(sqrt(N))` group operations with `O(sqrt(N) / 2^d)` memory.
+
+**Why kangaroo instead of rho:**
+- Rho searches the full group order (~2^256 for secp256k1), requiring ~2^128 iterations in expectation.
+- Kangaroo searches only the known range `total`, requiring ~sqrt(total) iterations.
+- For `total = 2^48`, kangaroo needs ~2^24 iterations vs rho's ~2^128.
 
 **Core idea:**
-1. Define pseudorandom walk `f(x) = x * g^a * h^b` where `g = G`, `h = target`.
-2. Exponents `a`, `b` are small scalars derived from a hash of `x`.
-3. Exploit the negation map: on secp256k1, if `P = (x, y)` then `-P = (x, -y)`. The discrete log of `-P` is `n - dlog(P)` where `n` is the curve order. This gives an effective **sqrt(2) speedup** (~1.414x).
-4. A point is "distinguished" if its compressed encoding has `d` leading zero bits.
-5. Each thread runs independent trails. When a trail hits a distinguished point, it stores `(x, a, b)` in a sharded table.
-6. If two trails hit the same distinguished point `x`, we have `x = g^a1 * h^b1 = g^a2 * h^b2`.
-7. Solving: `h = g^((a1 - a2) / (b2 - b1))`, giving the discrete log.
+1. Two walks on the elliptic curve group: **tame** and **wild**.
+2. **Tame kangaroo** starts at `T_0 = g^(alpha*start + beta)` (the lower bound of the discrete log range).
+3. **Wild kangaroo** starts at `W_0 = h = target` (the unknown discrete log we want to find).
+4. Both make pseudorandom jumps of deterministic sizes determined by a hash of the current point.
+5. Tame kangaroos store distinguished points in a shared table along with accumulated jump distances.
+6. When a wild kangaroo hits the same distinguished point as a tame one:
+   - `T_m = W_n` means `g^(a + d_t) = g^(x + d_w)` where `a = alpha*start + beta`, `x = alpha*k + beta`
+   - Therefore: `k = start + step * (d_t - d_w)`
+7. Verify the candidate by checking if it's in range and if it produces the target.
 
-**Expected runtime with negation map:**
-- Without negation: `E[T] ≈ sqrt(πn / 2)` group operations
-- With negation: `E[T] ≈ sqrt(πn / 4)` group operations
-
-**Sources:**
-- [Bernstein, Lange, Schwabe — "On the correct use of the negation map in the Pollard rho method"](https://eprint.iacr.org/2011/003)
-- [SafeCurves rho security analysis for secp256k1](https://safecurves.cr.yp.to/rho.html)
+**Expected runtime:**
+- `E[T] ≈ 2 * sqrt(N)` group operations per kangaroo pair (tame + wild)
+- With `p` parallel threads: near-linear speedup
 
 ### Data Structures
 
 ```rust
-struct DistinguishedPoint {
-    x: AffinePoint,
-    a: Scalar,  // exponent of g
-    b: Scalar,  // exponent of h
+/// Precomputed jump size for one partition of the walk.
+struct JumpSize {
+    distance: u64,  // jump distance in candidate-index units
 }
 
-struct RhoParams {
-    g: ProjectivePoint,        // generator
-    h: ProjectivePoint,        // target
+/// A distinguished point found during a trail, with accumulated distance.
+struct DistinguishedPoint {
+    x: AffinePoint,
+    distance: u64,  // sum of all jump distances to reach this point
+}
+
+struct KangarooParams {
+    g: ProjectivePoint,        // generator G
+    h: ProjectivePoint,        // target = Q
+    alpha: Scalar,             // affine slope
+    beta: Scalar,              // affine intercept
+    start: i128,               // first candidate
+    step: i128,                // candidate increment
+    total: u128,               // number of candidates
     d: u32,                    // distinguishing bit count (default: 16)
-    max_trails: u64,           // safety cap
+    max_iterations: u64,         // safety cap
     thread_count: usize,
     pool: &rayon::ThreadPool,
     shutdown: &ShutdownToken,
 }
 ```
 
-### Negation Map and Branchless Iteration
+### Jump Size Selection
 
-**Negation map application:**
-- After each step, compute `|x|` as the point with the lexicographically smaller y-coordinate: if `y > p/2`, replace with `-y`.
-- This is implemented branchlessly using masking: `y = y + (y_msb) * (p - 2*y)` where `y_msb` is 1 if `y > p/2`.
-- The iteration function always operates on `|x|`, effectively halving the search space.
-
-**Branchless iteration function:**
-- Partition into `r = 20` regions.
-- Precompute `(a_i, b_i)` pairs for each region.
-- Hash `|x|` to select region `i`.
-- Step: `x = |x| * g^a_i * h^b_i`.
-- All operations are straight-line (no conditional branches in the hot loop).
-
-**Sources:**
-- [Bernstein, Lange, Schwabe — branchless negation map](https://eprint.iacr.org/2011/003)
-
-### Fruitless Cycle Detection and Escape
-
-The negation map can cause walks to enter **2-cycles** and **4-cycles** (fruitless cycles that never hit a distinguished point).
-
-**Detection:**
-- Every `C` iterations (e.g., `C = 48`), store the current point and compare to a point `C/2` iterations ago.
-- Check for 2-cycles: `x_i == x_{i+1}` (modulo negation).
-- Check for 4-cycles: `x_i == x_{i+2}` (modulo negation).
-- These checks are done with minimal branching using masking.
-
-**Escape:**
-- If a cycle is detected, escape by doubling the lexicographically minimal point encountered: `x = 2 * |x_min|`.
-- This is also done branchlessly.
-
-**Cycle check frequency:** Tunable parameter based on `r`. For `r = 2048`, check every 48 iterations. For our implementation with `r = 20`, a check every 32 iterations is sufficient.
-
-**Sources:**
-- [Bernstein, Lange, Schwabe — cycle handling](https://eprint.iacr.org/2011/003)
-
-### Distinguished Point Table
-
-**Sharded design:**
-- `Vec<FxHashMap<[u8; 33], (Scalar, Scalar)>>` — one map per thread.
-- Each thread only writes to its own shard, reads from all shards.
-- Lock-free reads: shards are immutable after the current batch, or use `RwLock` per shard.
-
-**Parameter selection:**
-- Time-space tradeoff: `storage ≈ 2^(n/2 - d)`, `time ≈ (2^(n/2)/m + 2.5·2^d)·t`.
-- For CPU implementation with shared memory (not GPU with slow global DRAM), we can afford lower `d`.
-- For `n = 48`, `sqrt(n) = 2^24`:
-  - `d = 16`: ~256 distinguished points in memory, fast collision detection.
-  - `d = 20`: ~16 distinguished points, lower memory but slower.
-- **Default: `d = 16`** for CPU. This gives negligible memory usage (~few KB) while keeping collision detection fast.
-
-**Sources:**
-- [Richard — ecdl implementation notes](https://github.com/brichard19/ecdl)
-- [Boss — "Solving prime-field ECDLPs on GPUs with OpenCL"](https://www.cs.ru.nl/masters-theses/2015/E_Boss___Solving_prime-field_ECDLPs_on_Gpus_with_OpenCL.pdf)
+- Number of jump sizes: `JUMP_COUNT = 20`
+- Average jump size: `avg = sqrt(total) / 2` (in candidate-index units)
+- Jump sizes are random values uniformly distributed in `[1, sqrt(total)]`
+- The actual scalar multiplication is by `alpha * step * jump_distance`
+- For `alpha == 0` (degenerate case): all candidates have discrete log `beta`, so check if `h == g^beta` and return immediately.
 
 ### Pseudorandom Walk
 
-- Partition the point space into `r = 20` regions (following Rudolph 2025 finding that `k = 1` is optimal).
-- For each region `i`, precompute `(a_i, b_i)` pairs where `a_i` and `b_i` are small random scalars.
-- Given point `|x|`, hash `|x|` to select region `i`, then step: `x = |x| * g^a_i * h^b_i`.
-- The hash function can be a simple 64-bit hash of the compressed point encoding, modulo `r`.
+```rust
+fn kangaroo_step(
+    point: ProjectivePoint,
+    jump_sizes: &[JumpSize],
+    step_scalar: Scalar,
+) -> (ProjectivePoint, u64) {
+    let affine = point.to_affine();
+    let encoded = affine.to_encoded_point(true);
+    let bytes = encoded.as_bytes();
+    // Hash first 8 bytes of x-coordinate to select jump
+    let hash = u64::from_le_bytes([
+        bytes[1], bytes[2], bytes[3], bytes[4],
+        bytes[5], bytes[6], bytes[7], bytes[8],
+    ]);
+    let idx = (hash as usize) % jump_sizes.len();
+    let jump = jump_sizes[idx].distance;
+    let step = step_scalar * Scalar::from(jump);
+    (point + step, jump)
+}
+```
 
-**Sources:**
-- [Rudolph — "Choosing iteration maps for the parallel Pollard rho method"](https://arxiv.org/abs/2506.12844)
+### Distinguished Point Detection
 
-### Collision Detection and Solving
+Same as rho: a point is distinguished if the first `d` bits of its compressed x-coordinate are zero.
 
-- When a distinguished point is found, check all shards for the same key.
-- If found, compute the discrete log: `log = (a1 - a2) * (b2 - b1)^(-1) mod n`.
-- If not found, insert into the current thread's shard and continue.
-- Montgomery batch inversion can be used within a single thread to amortize inversion cost when processing multiple distinguished points in a batch.
+For CPU: default `d = 16`. Expected distinguished points per kangaroo: `sqrt(total) / 2^d`.
+For `total = 2^48`: ~256 points per kangaroo pair.
+
+### Parallel Collision Table
+
+**Sharded design:**
+- `Vec<FxHashMap<[u8; 33], u64>>` — one map per thread, storing `(key, distance)`.
+- Tame threads write to their shard.
+- Wild threads read all shards to check for collisions.
+- When a wild thread finds a collision: compute candidate `k = start + step * (d_tame - d_wild)`.
+
+**Collision verification:**
+After computing `k`, verify:
+1. `k` is in range `[start, start + total)`
+2. `derive_private_key(k, alpha, beta) * G == target`
+
+This prevents false positives from hash collisions or edge cases.
+
+### Parallelization Strategy
+
+- Each thread runs **one tame** and **one wild** walk concurrently.
+- Or: half the threads run tame walks, half run wild walks.
+- With `p` threads, expected speedup is near-linear: `O(sqrt(N) / p)`.
+- Atomic result variable for early termination when any thread finds the answer.
 
 ### Safety Limits
 
-- `max_trails`: maximum number of trails per thread before giving up.
-- `max_iterations`: total iterations across all threads (e.g., `10 * sqrt(n)` as a generous upper bound).
-- If limits exceeded, return `None` (failure, not an error).
-- The probability of failure with `max_iterations = 10 * sqrt(n)` is astronomically low.
+- `max_iterations = 10 * sqrt(total)` per kangaroo (generous upper bound).
+- If limit exceeded, return `None`.
+- Probability of failure with this cap is astronomically low.
 
 ## Component: Metrics and Observability
 
-### New Metrics (Rho)
+### New Metrics (Kangaroo)
 
-- `rho_trails`: total trails started
-- `rho_distinguished_points`: distinguished points found
-- `rho_collisions`: distinguished point collisions
-- `rho_iterations`: total iterations
-- `rho_time`: elapsed time for rho search
-- `rho_fruitless_cycles`: fruitless cycles detected and escaped
+- `kangaroo_tame_points`: tame distinguished points stored
+- `kangaroo_wild_points`: wild distinguished points checked
+- `kangaroo_collisions`: distinguished point collisions found
+- `kangaroo_iterations`: total iterations
+- `kangaroo_time`: elapsed time
 
 ### New Metrics (OpenMap)
 
@@ -180,14 +179,14 @@ The negation map can cause walks to enter **2-cycles** and **4-cycles** (fruitle
 
 ### Logging
 
-- Rho: periodic progress logs every 10,000 distinguished points.
+- Kangaroo: periodic progress logs every 10,000 distinguished points.
 - OpenMap: none (silent implementation detail).
 
 ## Error Handling
 
-- Rho is probabilistic. `None` result means "not found within limits", not an error.
-- If rho fails, the caller can retry with different random seeds (future enhancement).
-- No new error variants needed — rho uses existing `EngineError` or returns `Ok(None)`.
+- Kangaroo is probabilistic. `None` result means "not found within limits", not an error.
+- If kangaroo fails, the caller can retry with different random seeds.
+- `RhoTimeout` error variant (already added) is reused as `KangarooTimeout`.
 
 ## Testing Strategy
 
@@ -196,19 +195,18 @@ The negation map can cause walks to enter **2-cycles** and **4-cycles** (fruitle
 - Unit tests: insert/get with known keys, collision handling, tombstone reuse.
 - Property test: random keys, compare against `FxHashMap`.
 
-### Pollard's Rho
+### Pollard's Kangaroo
 
-- Unit tests: mock `RhoParams` with known discrete logs (small ranges).
-- Integration tests: run rho on a 48-bit range, assert it finds the answer.
-- Property tests: random small scalars, compare rho result against BSGS.
-- Stress test: run rho 100 times on the same problem, assert all succeed.
-- Cycle test: verify fruitless cycle detection works by constructing a known 2-cycle.
+- Unit tests: mock `KangarooParams` with known discrete logs (small ranges, e.g., 2^16).
+- Integration tests: run kangaroo on a 48-bit range, assert it finds the answer.
+- Property tests: random small scalars, compare kangaroo result against BSGS.
+- Stress test: run kangaroo 100 times on the same problem, assert all succeed.
 
 ### Benchmarks
 
-- Criterion bench comparing BSGS vs rho on 2^32 and 2^40 ranges.
+- Criterion bench comparing BSGS vs kangaroo on 2^32 and 2^40 ranges.
 - Memory benchmark: measure peak RSS for BSGS with `FxHashMap` vs `OpenMap`.
-- Rho scaling benchmark: measure speedup from 1 to N threads on a fixed problem.
+- Kangaroo scaling benchmark: measure speedup from 1 to N threads on a fixed problem.
 
 ## File Layout
 
@@ -216,9 +214,9 @@ The negation map can cause walks to enter **2-cycles** and **4-cycles** (fruitle
 src/search/
   mod.rs              # SearchEngine, algorithm dispatch
   bsgs.rs             # BSGS algorithm (uses OpenMap)
-  rho.rs              # Pollard's rho algorithm
+  kangaroo.rs         # Pollard's kangaroo algorithm
   parallel.rs         # Parallel scan (unchanged)
-  params.rs           # ScanParams, GiantStepParams, RhoParams
+  params.rs           # ScanParams, GiantStepParams, KangarooParams
   openmap.rs          # OpenMap implementation
   tests.rs            # Unit and integration tests
 ```
@@ -227,13 +225,13 @@ src/search/
 
 - No breaking changes to public API.
 - `SearchEngine::search` remains the entry point.
-- `bsgs_max_m` can be increased from `2^26` to `2^27` once `OpenMap` is validated.
+- `bsgs_max_m` increased from `2^26` to `2^27`.
 
 ## Rollout Plan
 
 1. Implement `OpenMap` and integrate into BSGS.
 2. Validate with tests and benchmarks.
-3. Implement Pollard's rho with negation map and branchless iteration.
+3. Implement Pollard's kangaroo (replacing the incorrect rho design).
 4. Integrate into `SearchEngine` with selection heuristic.
 5. Validate with integration tests and benchmarks.
 6. Update documentation and changelog.
