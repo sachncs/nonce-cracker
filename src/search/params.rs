@@ -1,6 +1,8 @@
 //! Parameter structs consumed by the search algorithms.
 
+use crate::context::ShutdownToken;
 use k256::{ProjectivePoint, PublicKey, Scalar};
+use rayon::ThreadPool;
 /// Parameters shared by [`parallel_scan`](crate::search::parallel::scan) and
 /// [`bsgs::search`](crate::search::bsgs::search).
 pub struct ScanParams {
@@ -44,4 +46,30 @@ pub struct GiantStepParams<'a> {
     pub pool: &'a rayon::ThreadPool,
     /// Cooperative shutdown token.
     pub shutdown: &'a crate::context::ShutdownToken,
+}
+
+/// Parameters for the Pollard's rho discrete-log search.
+pub struct RhoParams<'a> {
+    /// Generator point `G`.
+    pub g: ProjectivePoint,
+    /// Target point `h = target`.
+    pub h: ProjectivePoint,
+    /// Affine slope `alpha` from the signature.
+    pub alpha: Scalar,
+    /// Affine intercept `beta` from the signature.
+    pub beta: Scalar,
+    /// First nonce candidate in the search range.
+    pub start: i128,
+    /// Step between candidates.
+    pub step: i128,
+    /// Number of bits that must be zero for a distinguished point (default 16).
+    pub d: u32,
+    /// Maximum iterations per thread before giving up.
+    pub max_iterations: u64,
+    /// Number of parallel worker threads.
+    pub thread_count: usize,
+    /// Rayon thread pool.
+    pub pool: &'a ThreadPool,
+    /// Cooperative shutdown token.
+    pub shutdown: &'a ShutdownToken,
 }
