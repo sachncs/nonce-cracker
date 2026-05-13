@@ -19,8 +19,8 @@ use tracing::info;
 
 /// Maximum baby-step table size (in entries) to prevent unbounded memory use.
 ///
-/// At `2^26` entries the hash map consumes roughly 5 GB.
-pub const BSGS_MAX_M: u64 = 1 << 26;
+/// At `2^27` entries the OpenMap consumes roughly 10 GB.
+pub const BSGS_MAX_M: u64 = 1 << 27;
 /// Compressed encoding of the identity point, used as a sentinel key.
 const IDENTITY_KEY: [u8; 33] = [0u8; 33];
 /// Number of giant-step points processed in one batch-normalize call.
