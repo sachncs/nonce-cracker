@@ -408,3 +408,138 @@ fn test_kangaroo_shutdown() {
     let found = engine.kangaroo(&kangaroo_params).unwrap();
     assert_eq!(found, None);
 }
+
+#[test]
+fn test_kangaroo_total_one() {
+    let engine = make_engine(4);
+    let (sig, pk) = fixture();
+    let (alpha, beta) = derive_affine_constants(&sig).unwrap();
+    let kangaroo_params = crate::search::params::KangarooParams {
+        g: ProjectivePoint::GENERATOR,
+        h: pk.into(),
+        alpha,
+        beta,
+        start: 5,
+        step: 1,
+        total: 1,
+        d: 8,
+        max_iterations: 1_000_000,
+    };
+    let found = engine.kangaroo(&kangaroo_params).unwrap();
+    assert_eq!(found, Some(5));
+}
+
+#[test]
+fn test_kangaroo_step_not_one() {
+    let engine = make_engine(4);
+    let (sig, pk) = fixture();
+    let (alpha, beta) = derive_affine_constants(&sig).unwrap();
+    let kangaroo_params = crate::search::params::KangarooParams {
+        g: ProjectivePoint::GENERATOR,
+        h: pk.into(),
+        alpha,
+        beta,
+        start: 0,
+        step: 2,
+        total: 10,
+        d: 8,
+        max_iterations: 1_000_000,
+    };
+    let found = engine.kangaroo(&kangaroo_params).unwrap();
+    assert_eq!(found, None);
+}
+
+#[test]
+fn test_kangaroo_alpha_zero() {
+    let engine = make_engine(4);
+    let r = Scalar::from(1u64);
+    let s = Scalar::from(0u64);
+    let z = Scalar::from(1u64);
+    let sig = Signature::new(r, s, z);
+    let (alpha, beta) = derive_affine_constants(&sig).unwrap();
+    assert_eq!(alpha, Scalar::ZERO);
+
+    let target = k256::PublicKey::from_sec1_bytes(
+        (ProjectivePoint::GENERATOR * beta)
+            .to_affine()
+            .to_encoded_point(true)
+            .as_bytes(),
+    )
+    .unwrap();
+
+    let kangaroo_params = crate::search::params::KangarooParams {
+        g: ProjectivePoint::GENERATOR,
+        h: target.into(),
+        alpha,
+        beta,
+        start: 0,
+        step: 1,
+        total: 100,
+        d: 8,
+        max_iterations: 1_000_000,
+    };
+    let found = engine.kangaroo(&kangaroo_params).unwrap();
+    assert_eq!(found, Some(0));
+}
+
+#[test]
+fn test_kangaroo_no_match() {
+    let engine = make_engine(4);
+    let (sig, pk) = fixture();
+    let (alpha, beta) = derive_affine_constants(&sig).unwrap();
+    let kangaroo_params = crate::search::params::KangarooParams {
+        g: ProjectivePoint::GENERATOR,
+        h: pk.into(),
+        alpha,
+        beta,
+        start: 10,
+        step: 1,
+        total: 10,
+        d: 8,
+        max_iterations: 1_000_000,
+    };
+    let found = engine.kangaroo(&kangaroo_params).unwrap();
+    assert_eq!(found, None);
+}
+
+#[test]
+fn test_kangaroo_stress() {
+    let engine = make_engine(4);
+    let (sig, pk) = fixture();
+    let (alpha, beta) = derive_affine_constants(&sig).unwrap();
+    for _ in 0..10 {
+        let kangaroo_params = crate::search::params::KangarooParams {
+            g: ProjectivePoint::GENERATOR,
+            h: pk.into(),
+            alpha,
+            beta,
+            start: 0,
+            step: 1,
+            total: 1000,
+            d: 8,
+            max_iterations: 1_000_000,
+        };
+        let found = engine.kangaroo(&kangaroo_params).unwrap();
+        assert_eq!(found, Some(5));
+    }
+}
+
+#[test]
+fn test_kangaroo_negative_start() {
+    let engine = make_engine(4);
+    let (sig, pk) = fixture();
+    let (alpha, beta) = derive_affine_constants(&sig).unwrap();
+    let kangaroo_params = crate::search::params::KangarooParams {
+        g: ProjectivePoint::GENERATOR,
+        h: pk.into(),
+        alpha,
+        beta,
+        start: -5,
+        step: 1,
+        total: 20,
+        d: 8,
+        max_iterations: 1_000_000,
+    };
+    let found = engine.kangaroo(&kangaroo_params).unwrap();
+    assert_eq!(found, Some(5));
+}
