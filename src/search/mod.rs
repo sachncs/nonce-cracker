@@ -11,7 +11,7 @@ mod parallel;
 mod params;
 mod kangaroo;
 
-pub use params::ScanParams;
+pub use params::{KangarooParams, ScanParams};
 
 use crate::{
     config::Config,
@@ -228,8 +228,11 @@ impl SearchEngine {
     pub fn parallel_scan(&self, scan: &ScanParams) -> Option<i128> {
         parallel::scan(&self.pool, self.thread_count, &self.shutdown, scan)
     }
+}
 
-    /// Test-only access to the Pollard's kangaroo algorithm.
+/// Benchmark- and test-only access to the Pollard's kangaroo algorithm.
+#[doc(hidden)]
+impl SearchEngine {
     pub fn kangaroo(
         &self,
         kangaroo_params: &crate::search::params::KangarooParams,
