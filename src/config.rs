@@ -42,7 +42,12 @@ pub enum ConfigError {
     LogDirCreate(#[source] std::io::Error),
     /// An environment variable had an invalid value.
     #[error("invalid value for {name}: {value}")]
-    InvalidEnvVar { name: String, value: String },
+    InvalidEnvVar {
+        /// Name of the environment variable.
+        name: String,
+        /// Value that failed to parse.
+        value: String,
+    },
     /// An environment variable contained invalid unicode.
     #[error("environment variable {0} contains invalid unicode")]
     InvalidUnicode(String),

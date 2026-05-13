@@ -16,8 +16,8 @@ pub struct SearchReport {
     pub elapsed: Duration,
     /// Whether a match was found.
     pub found: bool,
-    /// The discovered delta, if any.
-    pub delta: Option<i128>,
+    /// The discovered nonce, if any.
+    pub nonce: Option<i128>,
     /// Number of threads used.
     pub threads: usize,
 }
@@ -44,7 +44,7 @@ impl MetricsSink for TracingMetricsSink {
             target: "nonce-cracker::metrics",
             event = "search_complete",
             found = report.found,
-            delta = report.delta,
+            nonce = report.nonce,
             elapsed_sec = format!("{:.3}", report.elapsed.as_secs_f64()),
             threads = report.threads,
         );
