@@ -17,6 +17,9 @@ use rustc_hash::FxHashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
+/// Sharded distinguished-point table: one RwLock-protected FxHashMap per thread.
+type DpTable = Arc<Vec<std::sync::RwLock<FxHashMap<[u8; 33], u64>>>>;
+
 /// Number of jump sizes for the pseudorandom walk.
 const JUMP_COUNT: usize = 20;
 /// Sentinel for "not found" in the atomic result.
@@ -82,8 +85,11 @@ pub fn search(
     };
 
     // Tame distinguished point table: sharded by thread, each shard protected by RwLock
-    let table: Arc<Vec<std::sync::RwLock<FxHashMap<[u8; 33], u64>>>> =
-        Arc::new((0..thread_count).map(|_| std::sync::RwLock::new(FxHashMap::default())).collect());
+    let table: DpTable = Arc::new(
+        (0..thread_count)
+            .map(|_| std::sync::RwLock::new(FxHashMap::default()))
+            .collect()
+    );
 
     let result = Arc::new(AtomicU64::new(NOT_FOUND));
     let dp_count = Arc::new(AtomicU64::new(0));
