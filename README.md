@@ -205,16 +205,32 @@ Relative `--outfile` values are resolved inside the configured log directory. Ab
 nonce-cracker/
 ├── src/
 │   ├── main.rs          # Binary entry point, CLI, search logic
-│   ├── logging.rs       # Centralized file logger
+│   ├── lib.rs           # Public API and module re-exports
+│   ├── cli.rs           # Command-line argument definitions
+│   ├── crypto.rs        # ECDSA affine constants, scalar/point operations
 │   ├── config.rs        # Configuration management
-│   └── metrics.rs       # Performance metrics
+│   ├── domain.rs        # Core types: Signature, SearchSpec, SearchOutcome
+│   ├── error.rs         # Structured error types
+│   ├── fixtures.rs      # Test fixtures
+│   ├── logging.rs       # Structured logging backend
+│   ├── metrics.rs       # Performance metrics collection
+│   ├── context.rs       # Shutdown token and app context
+│   └── search/
+│       ├── mod.rs       # SearchEngine and algorithm dispatch
+│       ├── parallel.rs  # Parallel scan for small ranges
+│       ├── bsgs.rs      # Baby-Step Giant-Step
+│       ├── kangaroo.rs  # Pollard's kangaroo for massive ranges
+│       ├── openmap.rs   # Custom open-addressing hash map
+│       ├── params.rs    # Search parameter structs
+│       └── tests.rs     # Search algorithm unit tests
 ├── tests/
-│   └── integration.rs   # CLI integration tests
+│   └── integration.rs   # End-to-end CLI tests
 ├── benches/
 │   └── search.rs        # Criterion benchmarks
 ├── examples/
 │   ├── demo.rs          # Usage demonstration
-│   └── generate.rs      # Test data generator
+│   ├── generate.rs      # Test data generator
+│   └── bench_bsgs.rs    # End-to-end BSGS benchmark
 ├── docs/
 │   ├── affine-relation-derivation.md  # Mathematical derivation
 │   └── DEPLOYMENT.md                  # Deployment guide
@@ -226,10 +242,15 @@ nonce-cracker/
 
 ### Module overview
 
-- **CLI** (`main.rs`): Command-line argument parsing via `clap`
-- **Crypto** (`main.rs`): `derive_affine_constants`, `derive_private_key`, `search` with hybrid scan/BSGS/kangaroo dispatch
-- **Search** (`src/search/`): Parallel scan, parallel BSGS, and Pollard's kangaroo orchestration via Rayon
-- `src/search/kangaroo.rs` — Pollard's kangaroo for bounded-range search (> 2^48 candidates)
+- **CLI** (`main.rs`, `cli.rs`): Command-line argument parsing via `clap`, search orchestration
+- **Crypto** (`crypto.rs`): `derive_affine_constants`, `derive_private_key`, scalar and point math
+- **Search** (`src/search/`):
+  - `mod.rs` — `SearchEngine` with three-tier dispatch (scan / BSGS / kangaroo)
+  - `parallel.rs` — Parallel brute-force scan for ranges ≤ 2^32
+  - `bsgs.rs` — Baby-Step Giant-Step with batched normalization and `OpenMap`
+  - `kangaroo.rs` — Pollard's kangaroo (lambda) for bounded-range search > 2^48
+  - `openmap.rs` — Open-addressing hash map replacing `FxHashMap`, ~25% memory savings
+  - `params.rs` — `ScanParams`, `GiantStepParams`, `KangarooParams`
 
 ## Algorithm
 
