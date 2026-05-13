@@ -80,3 +80,61 @@ fn walk_step(x: ProjectivePoint, regions: &[WalkRegion], g: ProjectivePoint, h: 
     let step = g * region.a + h * region.b;
     canonicalize(x + step)
 }
+
+fn is_distinguished(point: &AffinePoint, d: u32) -> bool {
+    let encoded = point.to_encoded_point(true);
+    let bytes = encoded.as_bytes();
+    let full_bytes = (d / 8) as usize;
+    let rem_bits = (d % 8) as usize;
+
+    // Check full bytes
+    for i in 0..full_bytes {
+        if bytes[1 + i] != 0 {
+            return false;
+        }
+    }
+
+    // Check partial byte (top rem_bits bits must be zero)
+    if rem_bits > 0 {
+        let mask = 0xFFu8 << (8 - rem_bits);
+        if (bytes[1 + full_bytes] & mask) != 0 {
+            return false;
+        }
+    }
+
+    true
+}
+
+struct CollisionTable {
+    shards: Vec<FxHashMap<[u8; 33], (Scalar, Scalar)>>,
+}
+
+impl CollisionTable {
+    fn new(thread_count: usize) -> Self {
+        let mut shards = Vec::with_capacity(thread_count);
+        for _ in 0..thread_count {
+            shards.push(FxHashMap::default());
+        }
+        Self { shards }
+    }
+
+    fn insert(&mut self, shard_id: usize, key: [u8; 33], a: Scalar, b: Scalar) {
+        self.shards[shard_id].insert(key, (a, b));
+    }
+
+    fn find_collision(
+        &self,
+        key: &[u8; 33],
+    ) -> Option<((Scalar, Scalar), (Scalar, Scalar))> {
+        let mut first = None;
+        for shard in &self.shards {
+            if let Some(&(a, b)) = shard.get(key) {
+                if let Some((a1, b1)) = first {
+                    return Some(((a1, b1), (a, b)));
+                }
+                first = Some((a, b));
+            }
+        }
+        None
+    }
+}
