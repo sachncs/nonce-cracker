@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Pollard's kangaroo (lambda) method for bounded-range discrete-log search for ranges > 2^48.
 - `OpenMap`: custom open-addressing hash map reducing BSGS memory by ~25%.
 - Algorithm dispatch heuristic: parallel scan / BSGS / kangaroo based on range size.
+- `CryptoError::RNotInvertible` for single-signature derivation when `r` has no inverse.
+- ECDSA signature verification (`verify_ecdsa_signature`) before search to prevent wasted computation.
+- `EngineError::ThreadCountZero` guard against `threads=0`.
+- `EngineError::KangarooTimeout` for iteration limit exceeded in kangaroo search.
+- Support for decimal input in `parse_scalar` (previously hex-only).
+- `examples/bench_bsgs.rs`: End-to-end BSGS benchmark for random nonces in configurable ranges (2^32 to 2^52).
 
 ### Changed
 - BSGS_MAX_M increased from 2^26 to 2^27 (~10 GB).
@@ -26,12 +32,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `SignaturePair` domain type and two-signature fixture helpers.
 - `CryptoError::S1NotInvertible` and `CryptoError::DenominatorNotInvertible` (replaced by `RNotInvertible`).
 
-### Added
-- `CryptoError::RNotInvertible` for single-signature derivation when `r` has no inverse.
-- ECDSA signature verification (`verify_ecdsa_signature`) before search to prevent wasted computation.
-- `EngineError::ThreadCountZero` guard against `threads=0`.
-- Support for decimal input in `parse_scalar` (previously hex-only).
-
 ### Fixed
 - Division-by-zero in `parallel::scan` when `thread_count == 0`.
 - `u64` overflow in BSGS offset computation by using two scalar multiplications instead of `chunk_start * m`.
@@ -41,9 +41,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Lock-free parallel scan**: Replaced `AtomicBool` + `Mutex<Option<i128>>` with a single `AtomicU64` sentinel, eliminating mutex contention.
 - **Per-chunk scalar-mult elimination**: Precompute `base_point = G * derive_private_key(start, alpha, beta)` once, then compute chunk start points via point addition (`base_point + chunk_start * step_point`) instead of per-chunk scalar multiplication.
 - **BSGS batch size tuning**: Increased giant-step batch size from 4096 to 8192, better amortizing Montgomery's trick in `batch_normalize`.
-
-### Added
-- `examples/bench_bsgs.rs`: End-to-end BSGS benchmark for random nonces in configurable ranges (2^32 to 2^52).
 
 ## [0.2.0] - 2026-04-10
 
