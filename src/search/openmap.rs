@@ -1,11 +1,15 @@
-use rustc_hash::{FxBuildHasher, FxHasher};
+use rustc_hash::FxBuildHasher;
 use std::hash::{BuildHasher, Hash, Hasher};
 
 const EMPTY: u8 = 0;
 const OCCUPIED: u8 = 1;
 const TOMBSTONE: u8 = 2;
 
-type Entry = ([u8; 33], u128, u8);
+struct Entry {
+    key: [u8; 33],
+    value: u128,
+    state: u8,
+}
 
 /// Open-addressing hash map with 33-byte keys and u128 values.
 ///
@@ -27,7 +31,11 @@ impl OpenMap {
         let target = (capacity as f64 / 0.7).ceil() as usize;
         let table_cap = target.next_power_of_two();
         let mut entries = Vec::with_capacity(table_cap);
-        entries.resize_with(table_cap, || ([0u8; 33], 0u128, EMPTY));
+        entries.resize_with(table_cap, || Entry {
+            key: [0u8; 33],
+            value: 0u128,
+            state: EMPTY,
+        });
         Self {
             entries,
             mask: table_cap - 1,
@@ -46,18 +54,25 @@ impl OpenMap {
     ///
     /// If the key already exists, its value is overwritten.
     pub fn insert(&mut self, key: [u8; 33], value: u128) {
+        if self.len >= self.entries.len() {
+            panic!("OpenMap is full: cannot insert into a saturated table");
+        }
         let base = self.hash(&key);
         let mut i = 0usize;
         loop {
-            let idx = (base + i * i) & self.mask;
+            let idx = (base + i.wrapping_mul(i)) & self.mask;
             let entry = &mut self.entries[idx];
-            if entry.2 == EMPTY || entry.2 == TOMBSTONE {
-                *entry = (key, value, OCCUPIED);
+            if entry.state == EMPTY || entry.state == TOMBSTONE {
+                *entry = Entry {
+                    key,
+                    value,
+                    state: OCCUPIED,
+                };
                 self.len += 1;
                 return;
             }
-            if entry.0 == key {
-                entry.1 = value;
+            if entry.key == key {
+                entry.value = value;
                 return;
             }
             i += 1;
@@ -69,11 +84,11 @@ impl OpenMap {
         let base = self.hash(key);
         let mut i = 0usize;
         loop {
-            let idx = (base + i * i) & self.mask;
+            let idx = (base + i.wrapping_mul(i)) & self.mask;
             let entry = &self.entries[idx];
-            match entry.2 {
+            match entry.state {
                 EMPTY => return None,
-                OCCUPIED if entry.0 == *key => return Some(&entry.1),
+                OCCUPIED if entry.key == *key => return Some(&entry.value),
                 _ => {
                     i += 1;
                 }
@@ -87,7 +102,7 @@ impl OpenMap {
     }
 
     /// Return the total number of slots in the table.
-    pub fn capacity(&self) -> usize {
+    pub fn table_capacity(&self) -> usize {
         self.entries.len()
     }
 }
@@ -143,8 +158,29 @@ mod tests {
     #[test]
     fn capacity_is_power_of_two() {
         let map = OpenMap::with_capacity(100);
-        let cap = map.capacity();
+        let cap = map.table_capacity();
         assert!(cap.is_power_of_two());
-        assert!(cap >= 200);
+        assert_eq!(cap, 256);
+    }
+
+    #[test]
+    fn collision_and_deep_probing() {
+        let mut map = OpenMap::with_capacity(128);
+        let n: u64 = 32;
+        for i in 0..n {
+            let mut key = [0u8; 33];
+            key[0..8].copy_from_slice(&[0xCA, 0xFE, 0xBA, 0xBE, 0xDE, 0xAD, 0xBE, 0xEF]);
+            key[8..16].copy_from_slice(&i.to_le_bytes());
+            key[16..24].copy_from_slice(&i.to_le_bytes());
+            map.insert(key, i as u128);
+        }
+        for i in 0..n {
+            let mut key = [0u8; 33];
+            key[0..8].copy_from_slice(&[0xCA, 0xFE, 0xBA, 0xBE, 0xDE, 0xAD, 0xBE, 0xEF]);
+            key[8..16].copy_from_slice(&i.to_le_bytes());
+            key[16..24].copy_from_slice(&i.to_le_bytes());
+            assert_eq!(map.get(&key), Some(&(i as u128)));
+        }
+        assert_eq!(map.len(), n as usize);
     }
 }
