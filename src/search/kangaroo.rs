@@ -29,9 +29,9 @@ struct JumpSize {
 
 /// Parameters for a single kangaroo walk.
 struct WalkParams {
-    g: ProjectivePoint,
     jump_sizes: Vec<JumpSize>,
-    step_scalar: Scalar,
+    /// Precomputed `g * (alpha * step * distance)` for each jump size.
+    jump_points: Vec<ProjectivePoint>,
     d: u32,
 }
 
@@ -67,21 +67,26 @@ pub fn search(
         .collect();
 
     let step_scalar = params.alpha * Scalar::from(params.step.cast_unsigned());
+    let jump_points: Vec<ProjectivePoint> = jump_sizes
+        .iter()
+        .map(|js| {
+            let scalar = step_scalar * Scalar::from(js.distance);
+            params.g * scalar
+        })
+        .collect();
+
     let walk = WalkParams {
-        g: params.g,
         jump_sizes,
-        step_scalar,
+        jump_points,
         d: params.d,
     };
 
-    // Tame distinguished point table: sharded by thread
-    let table = Arc::new(std::sync::Mutex::new(
-        (0..thread_count)
-            .map(|_| FxHashMap::<[u8; 33], u64>::default())
-            .collect::<Vec<_>>()
-    ));
+    // Tame distinguished point table: sharded by thread, each shard protected by RwLock
+    let table: Arc<Vec<std::sync::RwLock<FxHashMap<[u8; 33], u64>>>> =
+        Arc::new((0..thread_count).map(|_| std::sync::RwLock::new(FxHashMap::default())).collect());
 
     let result = Arc::new(AtomicU64::new(NOT_FOUND));
+    let dp_count = Arc::new(AtomicU64::new(0));
 
     pool.install(|| {
         (0..thread_count).into_par_iter().for_each(|tid| {
@@ -96,7 +101,7 @@ pub fn search(
             let mut iterations = 0u64;
             let max_iter = params.max_iterations;
 
-            loop {
+            'walk: loop {
                 if shutdown.is_signalled()
                     || result.load(Ordering::SeqCst) != NOT_FOUND
                 {
@@ -111,29 +116,40 @@ pub fn search(
                 // Advance tame kangaroo
                 let (new_tame, jump) = kangaroo_step(tame, &walk);
                 tame = new_tame;
-                tame_dist += jump;
+                match tame_dist.checked_add(jump) {
+                    Some(v) => tame_dist = v,
+                    None => break 'walk,
+                }
 
                 // Store tame distinguished point
                 let tame_affine = tame.to_affine();
                 if is_distinguished(&tame_affine, walk.d) {
                     let key = crate::crypto::affine_key(&tame_affine);
-                    let mut guard = table.lock().unwrap();
-                    guard[tid].insert(key, tame_dist);
-                    drop(guard);
+                    {
+                        let mut guard = table[tid].write().unwrap();
+                        guard.insert(key, tame_dist);
+                    }
+                    let c = dp_count.fetch_add(1, Ordering::Relaxed);
+                    if c > 0 && c % 10_000 == 9999 {
+                        tracing::info!("Kangaroo progress: {} distinguished points", c + 1);
+                    }
                 }
 
                 // Advance wild kangaroo
                 let (new_wild, jump) = kangaroo_step(wild, &walk);
                 wild = new_wild;
-                wild_dist += jump;
+                match wild_dist.checked_add(jump) {
+                    Some(v) => wild_dist = v,
+                    None => break 'walk,
+                }
 
                 // Check wild distinguished point against tame table
                 let wild_affine = wild.to_affine();
                 if is_distinguished(&wild_affine, walk.d) {
                     let key = crate::crypto::affine_key(&wild_affine);
-                    let guard = table.lock().unwrap();
-                    for shard in guard.iter() {
-                        if let Some(&tame_d) = shard.get(&key) {
+                    for shard in table.iter() {
+                        let guard = shard.read().unwrap();
+                        if let Some(&tame_d) = guard.get(&key) {
                             // Collision found: k = start + step * (tame_dist - wild_dist)
                             let delta = if tame_d >= wild_dist {
                                 tame_d - wild_dist
@@ -145,24 +161,20 @@ pub fn search(
                             // Verify candidate is in range
                             let idx = (candidate - params.start) / params.step;
                             if idx >= 0 && (idx as u128) < params.total {
-                                // Verify by recomputing target
-                                let test_scalar = crate::crypto::derive_private_key(
-                                    candidate, params.alpha, params.beta,
+                                let _ = result.compare_exchange(
+                                    NOT_FOUND,
+                                    delta,
+                                    Ordering::SeqCst,
+                                    Ordering::Relaxed,
                                 );
-                                let test_point = ProjectivePoint::GENERATOR * test_scalar;
-                                if test_point == params.h {
-                                    let _ = result.compare_exchange(
-                                        NOT_FOUND,
-                                        delta,
-                                        Ordering::SeqCst,
-                                        Ordering::Relaxed,
-                                    );
-                                    break;
-                                }
+                                break 'walk;
                             }
                         }
                     }
-                    drop(guard);
+                    let c = dp_count.fetch_add(1, Ordering::Relaxed);
+                    if c > 0 && c % 10_000 == 9999 {
+                        tracing::info!("Kangaroo progress: {} distinguished points", c + 1);
+                    }
                 }
             }
         });
@@ -187,9 +199,7 @@ fn kangaroo_step(point: ProjectivePoint, walk: &WalkParams) -> (ProjectivePoint,
     ]);
     let idx = (hash as usize) % walk.jump_sizes.len();
     let jump = walk.jump_sizes[idx].distance;
-    let step_scalar = walk.step_scalar * Scalar::from(jump);
-    let step_point = walk.g * step_scalar;
-    (point + step_point, jump)
+    (point + walk.jump_points[idx], jump)
 }
 
 fn is_distinguished(point: &AffinePoint, d: u32) -> bool {
