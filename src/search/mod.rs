@@ -5,7 +5,8 @@
 //! (`parallel_scan`, `bsgs`) are crate-private.
 
 mod bsgs;
-mod openmap;
+/// Open-addressing hash map for storing distinguished points.
+pub mod openmap;
 mod parallel;
 mod params;
 mod kangaroo;
