@@ -3,15 +3,8 @@
 //! Designed for ranges where the discrete log is known to lie in a bounded
 //! interval [a, a + N]. Expected runtime: O(sqrt(N)) group operations.
 
-use crate::{
-    context::ShutdownToken,
-    error::Result,
-    search::params::KangarooParams,
-};
-use k256::{
-    elliptic_curve::sec1::ToEncodedPoint,
-    AffinePoint, ProjectivePoint, Scalar,
-};
+use crate::{context::ShutdownToken, error::Result, search::params::KangarooParams};
+use k256::{elliptic_curve::sec1::ToEncodedPoint, AffinePoint, ProjectivePoint, Scalar};
 use rayon::prelude::*;
 use rustc_hash::FxHashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -88,7 +81,7 @@ pub fn search(
     let table: DpTable = Arc::new(
         (0..thread_count)
             .map(|_| std::sync::RwLock::new(FxHashMap::default()))
-            .collect()
+            .collect(),
     );
 
     let result = Arc::new(AtomicU64::new(NOT_FOUND));
@@ -108,9 +101,7 @@ pub fn search(
             let max_iter = params.max_iterations;
 
             'walk: loop {
-                if shutdown.is_signalled()
-                    || result.load(Ordering::SeqCst) != NOT_FOUND
-                {
+                if shutdown.is_signalled() || result.load(Ordering::SeqCst) != NOT_FOUND {
                     break;
                 }
 
@@ -200,8 +191,7 @@ fn kangaroo_step(point: ProjectivePoint, walk: &WalkParams) -> (ProjectivePoint,
     let encoded = affine.to_encoded_point(true);
     let bytes = encoded.as_bytes();
     let hash = u64::from_le_bytes([
-        bytes[1], bytes[2], bytes[3], bytes[4],
-        bytes[5], bytes[6], bytes[7], bytes[8],
+        bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7], bytes[8],
     ]);
     let idx = (hash as usize) % walk.jump_sizes.len();
     let jump = walk.jump_sizes[idx].distance;
