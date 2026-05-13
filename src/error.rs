@@ -35,18 +35,15 @@ pub enum Error {
 /// Errors originating in the cryptographic domain.
 #[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
 pub enum CryptoError {
-    /// `s1` has no multiplicative inverse.
-    #[error("s1 not invertible")]
-    S1NotInvertible,
-    /// The denominator `a = s2/s1 * r1 - r2` has no inverse.
-    #[error("denominator not invertible")]
-    DenominatorNotInvertible,
+    /// `r` has no multiplicative inverse.
+    #[error("r not invertible")]
+    RNotInvertible,
     /// Parsed scalar exceeds the field range.
     #[error("scalar out of range")]
     ScalarOutOfRange,
-    /// Empty or whitespace-only hex string.
-    #[error("empty hex string")]
-    EmptyHexString,
+    /// Empty or whitespace-only input string.
+    #[error("empty input")]
+    EmptyInput,
     /// Hex string decodes to more than 32 bytes.
     #[error("scalar exceeds 32 bytes")]
     ScalarExceeds32Bytes,
@@ -59,6 +56,9 @@ pub enum CryptoError {
     /// SEC1 parser rejected the public key.
     #[error("pubkey parse error: {0}")]
     PubkeyParse(String),
+    /// Signature does not verify against the provided public key.
+    #[error("invalid signature: {0}")]
+    InvalidSignature(String),
 }
 
 /// Errors related to search range invariants.
@@ -99,12 +99,12 @@ pub enum EngineError {
     /// The BSGS segment length overflows `u64`.
     #[error("BSGS segment length overflow")]
     BsgsSegmentOverflow,
-    /// Giant-step chunk boundary conversion failed.
-    #[error("giant-step chunk boundary overflow")]
-    GsChunkOverflow,
-    /// Giant-step coefficient conversion failed.
-    #[error("giant-step coefficient overflow")]
-    GsCoeffOverflow,
+    /// Thread count was explicitly set to zero.
+    #[error("thread count must be > 0")]
+    ThreadCountZero,
+    /// Pollard's rho exceeded the iteration limit without finding a collision.
+    #[error("rho iteration limit exceeded")]
+    RhoTimeout,
 }
 
 /// Convenience alias used by every public function in this crate.
