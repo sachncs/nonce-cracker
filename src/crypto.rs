@@ -1,73 +1,135 @@
-use crate::domain::SignaturePair;
+//! Cryptographic primitives for the affine-relation attack.
+//!
+//! This module provides scalar/field parsing, affine constant derivation,
+//! ECDSA signature verification, and helper utilities used by the search
+//! engine and CLI.
+
+use crate::domain::Signature;
 use crate::error::{CryptoError, Result};
 use k256::{
+    ecdsa::{signature::hazmat::PrehashVerifier, Signature as EcdsaSignature, VerifyingKey},
     elliptic_curve::{sec1::ToEncodedPoint, PrimeField},
     AffinePoint, PublicKey, Scalar,
 };
 
-/// Derive the affine constants `alpha` and `beta` from two ECDSA signatures
-/// under the assumption that the nonces are related by `k2 = k1 + delta`.
+/// Derive the affine constants `alpha` and `beta` from a single ECDSA
+/// signature such that the private key can be expressed as:
 ///
-/// The private key can then be expressed as:
-///   `d = alpha * delta + beta  (mod n)`
+///   `d = alpha * k + beta  (mod n)`
+///
+/// where `k` is the nonce used to produce the signature.
 ///
 /// # Errors
 ///
-/// Returns [`CryptoError::S1NotInvertible`] if `s1` has no inverse, or
-/// [`CryptoError::DenominatorNotInvertible`] if the denominator `a` is zero.
-pub fn derive_affine_constants(pair: &SignaturePair) -> Result<(Scalar, Scalar)> {
-    let u: Scalar = Option::from(pair.first.s.invert()).ok_or(CryptoError::S1NotInvertible)?;
-    let su = pair.second.s * u;
-    let a: Scalar = su * pair.first.r - pair.second.r;
-    let b: Scalar = pair.second.z - su * pair.first.z;
-    let c: Scalar = pair.second.s;
-    let a_inv: Scalar = Option::from(a.invert()).ok_or(CryptoError::DenominatorNotInvertible)?;
-    Ok((-(c * a_inv), b * a_inv))
+/// Returns [`CryptoError::RNotInvertible`] if `r` has no inverse.
+pub fn derive_affine_constants(sig: &Signature) -> Result<(Scalar, Scalar)> {
+    let r_inv = sig.r.invert();
+    if r_inv.is_none().into() {
+        return Err(CryptoError::RNotInvertible.into());
+    }
+    let r_inv = r_inv.unwrap();
+    let alpha = r_inv * sig.s;
+    let beta = Scalar::ZERO - (r_inv * sig.z);
+    Ok((alpha, beta))
 }
 
-/// Compute the candidate private key for a given `delta` using the affine
-/// relation `d = alpha * delta + beta`.
+/// Compute the candidate private key for a given nonce `k` using the affine
+/// relation `d = alpha * k + beta`.
 #[inline]
 #[must_use]
-pub fn derive_private_key(delta: i128, alpha: Scalar, beta: Scalar) -> Scalar {
-    let s = Scalar::from(delta.unsigned_abs());
-    if delta < 0 {
+pub fn derive_private_key(nonce: i128, alpha: Scalar, beta: Scalar) -> Scalar {
+    let s = Scalar::from(nonce.unsigned_abs());
+    if nonce < 0 {
         beta - alpha * s
     } else {
         alpha * s + beta
     }
 }
 
-/// Parse a hex string into a secp256k1 `Scalar`.
+/// Parse a decimal or hex string into a secp256k1 `Scalar`.
 ///
-/// Accepts with or without `0x` prefix. Odd-length hex is zero-padded.
-/// Returns an error for empty strings, oversized values (>32 bytes), or
-/// values outside the scalar field range.
+/// Accepts decimal strings or hex strings with optional `0x`/`0X` prefix.
+/// Odd-length hex is zero-padded. Returns an error for empty strings,
+/// oversized values (>32 bytes), or values outside the scalar field range.
 ///
 /// # Errors
 ///
-/// Returns [`CryptoError::EmptyHexString`], [`CryptoError::ScalarExceeds32Bytes`],
+/// Returns [`CryptoError::EmptyInput`], [`CryptoError::ScalarExceeds32Bytes`],
 /// or [`CryptoError::ScalarOutOfRange`] for invalid input.
 pub fn parse_scalar(s: &str) -> Result<Scalar> {
-    let raw = s.trim().trim_start_matches("0x").trim_start_matches("0X");
+    let trimmed = s.trim();
+    if trimmed.is_empty() {
+        return Err(CryptoError::EmptyInput.into());
+    }
+
+    // Detect hex by explicit prefix or presence of hex digits (a-f/A-F).
+    let is_hex = trimmed.starts_with("0x")
+        || trimmed.starts_with("0X")
+        || trimmed.chars().any(|c| matches!(c, 'a'..='f' | 'A'..='F'));
+    let raw = trimmed.trim_start_matches("0x").trim_start_matches("0X");
+
     if raw.is_empty() {
-        return Err(CryptoError::EmptyHexString.into());
+        return Err(CryptoError::EmptyInput.into());
     }
-    let len = raw.len();
-    if len > 64 {
-        return Err(CryptoError::ScalarExceeds32Bytes.into());
-    }
+
     let mut arr = [0u8; 32];
-    let decoded_len = len.div_ceil(2);
-    if len % 2 == 1 {
-        let mut tmp = [0u8; 65];
-        tmp[0] = b'0';
-        tmp[1..][..len].copy_from_slice(raw.as_bytes());
-        hex::decode_to_slice(&tmp[..=len], &mut arr[32 - decoded_len..])?;
+
+    if is_hex {
+        let len = raw.len();
+        if len > 64 {
+            return Err(CryptoError::ScalarExceeds32Bytes.into());
+        }
+        let decoded_len = len.div_ceil(2);
+        if len % 2 == 1 {
+            let mut tmp = [0u8; 65];
+            tmp[0] = b'0';
+            tmp[1..][..len].copy_from_slice(raw.as_bytes());
+            hex::decode_to_slice(&tmp[..=len], &mut arr[32 - decoded_len..])?;
+        } else {
+            hex::decode_to_slice(raw, &mut arr[32 - decoded_len..])?;
+        }
     } else {
-        hex::decode_to_slice(raw, &mut arr[32 - decoded_len..])?;
+        // Parse as decimal: accumulate into big-endian 256-bit integer.
+        for ch in raw.chars() {
+            let digit = ch.to_digit(10).ok_or(CryptoError::ScalarOutOfRange)? as u16;
+            let mut carry = digit;
+            for i in (0..32).rev() {
+                let val = (arr[i] as u16) * 10 + carry;
+                arr[i] = (val & 0xFF) as u8;
+                carry = val >> 8;
+            }
+            if carry != 0 {
+                return Err(CryptoError::ScalarExceeds32Bytes.into());
+            }
+        }
     }
+
     Option::from(Scalar::from_repr(arr.into())).ok_or_else(|| CryptoError::ScalarOutOfRange.into())
+}
+
+/// Verify an ECDSA signature (`r`, `s`) over message hash `z` against `pubkey`.
+///
+/// Rejects signatures where `r` or `s` is zero or out of range, or where the
+/// signature does not mathematically verify against the given public key.
+///
+/// # Errors
+///
+/// Returns [`CryptoError::InvalidSignature`] if the signature is malformed or
+/// fails verification.
+pub fn verify_ecdsa_signature(
+    pubkey: &PublicKey,
+    r: &Scalar,
+    s: &Scalar,
+    z: &Scalar,
+) -> Result<()> {
+    let vk = VerifyingKey::from(pubkey);
+    let sig = EcdsaSignature::from_scalars(r.to_bytes(), s.to_bytes())
+        .map_err(|e| CryptoError::InvalidSignature(e.to_string()))?;
+    // k256 requires low-S signatures; normalize before verifying.
+    let sig = sig.normalize_s().unwrap_or(sig);
+    vk.verify_prehash(z.to_bytes().as_ref(), &sig)
+        .map_err(|e| CryptoError::InvalidSignature(e.to_string()))?;
+    Ok(())
 }
 
 /// Parse a hex string into a secp256k1 `PublicKey`.
@@ -168,22 +230,16 @@ pub fn affine_key(affine: &AffinePoint) -> [u8; 33] {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use k256::ProjectivePoint;
 
     #[test]
     fn test_precompute_and_private_key() {
-        let sig1 = SignaturePair::new(
-            crate::domain::Signature::new(
-                Scalar::from(1u64),
-                Scalar::from(3u64),
-                Scalar::from(5u64),
-            ),
-            crate::domain::Signature::new(
-                Scalar::from(2u64),
-                Scalar::from(4u64),
-                Scalar::from(6u64),
-            ),
+        let sig = crate::domain::Signature::new(
+            Scalar::from(1u64),
+            Scalar::from(3u64),
+            Scalar::from(5u64),
         );
-        let (a, b) = derive_affine_constants(&sig1).unwrap();
+        let (a, b) = derive_affine_constants(&sig).unwrap();
         assert_eq!(derive_private_key(0, a, b), b);
     }
 
@@ -214,7 +270,7 @@ mod tests {
     }
 
     #[test]
-    fn test_signed_delta() {
+    fn test_signed_nonce() {
         let a = Scalar::from(1u64);
         let b = Scalar::from(2u64);
         assert_eq!(derive_private_key(-1, a, b), b - a);
@@ -240,17 +296,10 @@ mod tests {
 
     #[test]
     fn test_edge_cases() {
-        let sig = SignaturePair::new(
-            crate::domain::Signature::new(
-                Scalar::from(1u64),
-                Scalar::from(1u64),
-                Scalar::from(0u64),
-            ),
-            crate::domain::Signature::new(
-                Scalar::from(2u64),
-                Scalar::from(1u64),
-                Scalar::from(0u64),
-            ),
+        let sig = crate::domain::Signature::new(
+            Scalar::from(1u64),
+            Scalar::from(1u64),
+            Scalar::from(0u64),
         );
         assert!(derive_affine_constants(&sig).is_ok());
     }
@@ -291,5 +340,59 @@ mod tests {
     fn test_parse_int_min() {
         let min = "-170141183460469231731687303715884105728";
         assert_eq!(parse_int(min).unwrap(), i128::MIN);
+    }
+
+    use crate::fixtures::{r_from_nonce, sig_s};
+
+    #[test]
+    fn test_verify_ecdsa_valid() {
+        let d = Scalar::from(0x3039u64);
+        let nonce = 0x1234u64;
+        let z = Scalar::from(1u64);
+        let r = r_from_nonce(nonce);
+        let s = sig_s(1, r, d, nonce);
+        let pk = PublicKey::from_sec1_bytes(
+            (ProjectivePoint::GENERATOR * d)
+                .to_affine()
+                .to_encoded_point(true)
+                .as_bytes(),
+        )
+        .unwrap();
+        assert!(verify_ecdsa_signature(&pk, &r, &s, &z).is_ok());
+    }
+
+    #[test]
+    fn test_verify_ecdsa_invalid_s() {
+        let d = Scalar::from(0x3039u64);
+        let nonce = 0x1234u64;
+        let z = Scalar::from(1u64);
+        let r = r_from_nonce(nonce);
+        let pk = PublicKey::from_sec1_bytes(
+            (ProjectivePoint::GENERATOR * d)
+                .to_affine()
+                .to_encoded_point(true)
+                .as_bytes(),
+        )
+        .unwrap();
+        // s = 0 is never valid
+        assert!(verify_ecdsa_signature(&pk, &r, &Scalar::ZERO, &z).is_err());
+    }
+
+    #[test]
+    fn test_verify_ecdsa_wrong_pubkey() {
+        let d = Scalar::from(0x3039u64);
+        let wrong_d = Scalar::from(0x1234u64);
+        let nonce = 0x1234u64;
+        let z = Scalar::from(1u64);
+        let r = r_from_nonce(nonce);
+        let s = sig_s(1, r, d, nonce);
+        let wrong_pk = PublicKey::from_sec1_bytes(
+            (ProjectivePoint::GENERATOR * wrong_d)
+                .to_affine()
+                .to_encoded_point(true)
+                .as_bytes(),
+        )
+        .unwrap();
+        assert!(verify_ecdsa_signature(&wrong_pk, &r, &s, &z).is_err());
     }
 }
