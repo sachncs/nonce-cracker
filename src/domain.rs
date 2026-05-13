@@ -26,24 +26,6 @@ impl Signature {
     }
 }
 
-/// A pair of signatures that share the same private key and nonces related
-/// by `k2 = k1 + delta`.
-#[derive(Debug, Clone, Copy)]
-pub struct SignaturePair {
-    /// First signature.
-    pub first: Signature,
-    /// Second signature.
-    pub second: Signature,
-}
-
-impl SignaturePair {
-    /// Create a new signature pair.
-    #[must_use]
-    pub const fn new(first: Signature, second: Signature) -> Self {
-        Self { first, second }
-    }
-}
-
 /// Validated search specification.
 ///
 /// Invariants enforced at construction:
@@ -51,11 +33,11 @@ impl SignaturePair {
 /// - `end >= start`
 #[derive(Debug, Clone, Copy)]
 pub struct SearchSpec {
-    /// Inclusive lower bound of the delta search range.
+    /// Inclusive lower bound of the nonce search range.
     pub start: i128,
-    /// Inclusive upper bound of the delta search range.
+    /// Inclusive upper bound of the nonce search range.
     pub end: i128,
-    /// Step size between successive delta candidates.
+    /// Step size between successive nonce candidates.
     pub step: i128,
 }
 
@@ -96,8 +78,8 @@ impl SearchSpec {
 /// Outcome of a search executed by [`crate::search::SearchEngine`].
 #[derive(Debug, Clone, Copy)]
 pub struct SearchOutcome {
-    /// The discovered delta, or `None` if the search completed without a match.
-    pub delta: Option<i128>,
+    /// The discovered nonce, or `None` if the search completed without a match.
+    pub nonce: Option<i128>,
     /// Affine coefficient `alpha`.
     pub alpha: Scalar,
     /// Affine intercept `beta`.
@@ -107,8 +89,8 @@ pub struct SearchOutcome {
 impl SearchOutcome {
     /// Construct a new outcome.
     #[must_use]
-    pub const fn new(delta: Option<i128>, alpha: Scalar, beta: Scalar) -> Self {
-        Self { delta, alpha, beta }
+    pub const fn new(nonce: Option<i128>, alpha: Scalar, beta: Scalar) -> Self {
+        Self { nonce, alpha, beta }
     }
 }
 
