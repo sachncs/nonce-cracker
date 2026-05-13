@@ -8,6 +8,7 @@ mod bsgs;
 mod openmap;
 mod parallel;
 mod params;
+mod rho;
 
 pub use params::ScanParams;
 
