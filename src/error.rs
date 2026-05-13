@@ -102,9 +102,9 @@ pub enum EngineError {
     /// Thread count was explicitly set to zero.
     #[error("thread count must be > 0")]
     ThreadCountZero,
-    /// Pollard's rho exceeded the iteration limit without finding a collision.
-    #[error("rho iteration limit exceeded")]
-    RhoTimeout,
+    /// Pollard's kangaroo exceeded the iteration limit without finding a collision.
+    #[error("kangaroo iteration limit exceeded")]
+    KangarooTimeout,
 }
 
 /// Convenience alias used by every public function in this crate.

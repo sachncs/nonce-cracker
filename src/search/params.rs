@@ -48,8 +48,8 @@ pub struct GiantStepParams<'a> {
     pub shutdown: &'a crate::context::ShutdownToken,
 }
 
-/// Parameters for the Pollard's rho discrete-log search.
-pub struct RhoParams<'a> {
+/// Parameters for the Pollard's kangaroo bounded discrete-log search.
+pub struct KangarooParams<'a> {
     /// Generator point `G`.
     pub g: ProjectivePoint,
     /// Target point `h = target`.
@@ -62,6 +62,8 @@ pub struct RhoParams<'a> {
     pub start: i128,
     /// Step between candidates.
     pub step: i128,
+    /// Total number of candidates.
+    pub total: u128,
     /// Number of bits that must be zero for a distinguished point (default 16).
     pub d: u32,
     /// Maximum iterations per thread before giving up.

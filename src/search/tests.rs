@@ -361,29 +361,30 @@ fn test_build_baby_steps_and_giant_empty() {
 }
 
 #[test]
-fn test_rho_small_range() {
+fn test_kangaroo_small_range() {
     let engine = make_engine(4);
     let (sig, pk) = fixture();
     let (alpha, beta) = derive_affine_constants(&sig).unwrap();
-    let rho_params = crate::search::params::RhoParams {
+    let kangaroo_params = crate::search::params::KangarooParams {
         g: ProjectivePoint::GENERATOR,
         h: pk.into(),
         alpha,
         beta,
         start: 0,
         step: 1,
-        d: 8, // lower d for small test so it finishes fast
+        total: 1000,
+        d: 8, // lower d for small test
         max_iterations: 1_000_000,
         thread_count: 4,
         pool: &engine.pool,
         shutdown: &engine.shutdown,
     };
-    let found = engine.rho(&rho_params).unwrap();
+    let found = engine.kangaroo(&kangaroo_params).unwrap();
     assert_eq!(found, Some(5));
 }
 
 #[test]
-fn test_rho_shutdown() {
+fn test_kangaroo_shutdown() {
     let (sig, pk) = fixture();
     let (alpha, beta) = derive_affine_constants(&sig).unwrap();
     let pool = rayon::ThreadPoolBuilder::new().num_threads(4).build().unwrap();
@@ -396,19 +397,20 @@ fn test_rho_shutdown() {
         Arc::new(TracingMetricsSink),
         50,
     );
-    let rho_params = crate::search::params::RhoParams {
+    let kangaroo_params = crate::search::params::KangarooParams {
         g: ProjectivePoint::GENERATOR,
         h: pk.into(),
         alpha,
         beta,
         start: 0,
         step: 1,
+        total: 1000,
         d: 8,
         max_iterations: 1_000_000,
         thread_count: 4,
         pool: &engine.pool,
         shutdown: &engine.shutdown,
     };
-    let found = engine.rho(&rho_params).unwrap();
+    let found = engine.kangaroo(&kangaroo_params).unwrap();
     assert_eq!(found, None);
 }
