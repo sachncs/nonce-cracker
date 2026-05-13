@@ -60,7 +60,8 @@ impl OpenMap {
         let base = self.hash(&key);
         let mut i = 0usize;
         loop {
-            let idx = (base + i.wrapping_mul(i)) & self.mask;
+            let step = i.wrapping_mul(i + 1) / 2;
+            let idx = (base + step) & self.mask;
             let entry = &mut self.entries[idx];
             if entry.state == EMPTY || entry.state == TOMBSTONE {
                 *entry = Entry {
@@ -84,7 +85,8 @@ impl OpenMap {
         let base = self.hash(key);
         let mut i = 0usize;
         loop {
-            let idx = (base + i.wrapping_mul(i)) & self.mask;
+            let step = i.wrapping_mul(i + 1) / 2;
+            let idx = (base + step) & self.mask;
             let entry = &self.entries[idx];
             match entry.state {
                 EMPTY => return None,
@@ -104,6 +106,38 @@ impl OpenMap {
     /// Return the total number of slots in the table.
     pub fn table_capacity(&self) -> usize {
         self.entries.len()
+    }
+}
+
+impl IntoIterator for OpenMap {
+    type Item = ([u8; 33], u128);
+    type IntoIter = OpenMapIntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        OpenMapIntoIter {
+            entries: self.entries,
+            index: 0,
+        }
+    }
+}
+
+pub struct OpenMapIntoIter {
+    entries: Vec<Entry>,
+    index: usize,
+}
+
+impl Iterator for OpenMapIntoIter {
+    type Item = ([u8; 33], u128);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while self.index < self.entries.len() {
+            let entry = &self.entries[self.index];
+            self.index += 1;
+            if entry.state == OCCUPIED {
+                return Some((entry.key, entry.value));
+            }
+        }
+        None
     }
 }
 
