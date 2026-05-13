@@ -121,6 +121,7 @@ impl IntoIterator for OpenMap {
     }
 }
 
+/// Iterator over the entries of an [`OpenMap`].
 pub struct OpenMapIntoIter {
     entries: Vec<Entry>,
     index: usize,

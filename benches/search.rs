@@ -13,35 +13,9 @@
 //! `target/criterion/report/index.html`.
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
-use k256::{elliptic_curve::PrimeField, ProjectivePoint, Scalar};
-
-fn derive_affine_constants(
-    r1: Scalar,
-    r2: Scalar,
-    s1: Scalar,
-    s2: Scalar,
-    z1: Scalar,
-    z2: Scalar,
-) -> Option<(Scalar, Scalar)> {
-    let u: Scalar = Option::<Scalar>::from(s1.invert())?;
-    let a: Scalar = s2 * r1 * u - r2;
-    let b: Scalar = z2 - s2 * z1 * u;
-    let c: Scalar = s2;
-    let a_inv: Scalar = Option::<Scalar>::from(a.invert())?;
-    let alpha: Scalar = -(c * a_inv);
-    let beta: Scalar = b * a_inv;
-    Some((alpha, beta))
-}
-
-#[inline]
-fn derive_private_key(delta: i64, alpha: Scalar, beta: Scalar) -> Scalar {
-    let delta_scalar = Scalar::from(delta.unsigned_abs());
-    if delta < 0 {
-        beta - alpha * delta_scalar
-    } else {
-        alpha * delta_scalar + beta
-    }
-}
+use k256::{ProjectivePoint, Scalar};
+use nonce_cracker::{derive_affine_constants, derive_private_key};
+use nonce_cracker::search::openmap::OpenMap;
 
 fn bench_scalar_invert(c: &mut Criterion) {
     let scalar = Scalar::from(123_456_789_u64);
@@ -50,40 +24,23 @@ fn bench_scalar_invert(c: &mut Criterion) {
     });
 }
 
-fn bench_precompute(c: &mut Criterion) {
-    let r1 = Scalar::from(1u64);
-    let r2 = Scalar::from(2u64);
-    let s1 = Scalar::from(3u64);
-    let s2 = Scalar::from(4u64);
-    let z1 = Scalar::from(5u64);
-    let z2 = Scalar::from(6u64);
+fn bench_derive_affine_constants(c: &mut Criterion) {
+    let r = Scalar::from(1u64);
+    let s = Scalar::from(3u64);
+    let z = Scalar::from(5u64);
+    let sig = nonce_cracker::Signature::new(r, s, z);
 
     c.bench_function("derive_affine_constants", |b| {
-        b.iter(|| {
-            derive_affine_constants(
-                black_box(r1),
-                black_box(r2),
-                black_box(s1),
-                black_box(s2),
-                black_box(z1),
-                black_box(z2),
-            )
-        });
+        b.iter(|| derive_affine_constants(black_box(&sig)).unwrap());
     });
 }
 
-fn parse_scalar_hex(s: &str) -> Scalar {
-    let bytes: [u8; 32] = hex::decode(s).unwrap().try_into().unwrap();
-    Scalar::from_repr(bytes.into()).unwrap()
-}
-
-fn bench_scalar_operations(c: &mut Criterion) {
-    let alpha =
-        parse_scalar_hex("a7fa8b4a2944338eee5180dbee8e763334c9c09c5f6450c8e08150714e3bd81b");
-    let beta = parse_scalar_hex("585e5a8c07383473109d225e68d210b5bc791f870357bf1c61fb5dbf6578740e");
+fn bench_derive_private_key(c: &mut Criterion) {
+    let alpha = Scalar::from(3u64);
+    let beta = Scalar::from(7u64);
 
     c.bench_function("derive_private_key", |b| {
-        b.iter(|| derive_private_key(black_box(42i64), black_box(alpha), black_box(beta)));
+        b.iter(|| derive_private_key(black_box(42i128), black_box(alpha), black_box(beta)));
     });
 }
 
@@ -99,12 +56,8 @@ fn bench_search_chunk(c: &mut Criterion) {
 
     for size in &[1_000_u64, 10_000, 100_000] {
         group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, &size| {
-            let alpha = parse_scalar_hex(
-                "a7fa8b4a2944338eee5180dbee8e763334c9c09c5f6450c8e08150714e3bd81b",
-            );
-            let beta = parse_scalar_hex(
-                "585e5a8c07383473109d225e68d210b5bc791f870357bf1c61fb5dbf6578740e",
-            );
+            let alpha = Scalar::from(3u64);
+            let beta = Scalar::from(7u64);
             let step_scalar = alpha * Scalar::from(1u64);
             let step_point = ProjectivePoint::GENERATOR * step_scalar;
 
@@ -124,12 +77,36 @@ fn bench_search_chunk(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_openmap(c: &mut Criterion) {
+    let mut group = c.benchmark_group("openmap");
+    for size in [1000, 10_000, 100_000, 1_000_000].iter() {
+        group.bench_with_input(BenchmarkId::new("insert_get", size), size, |b, &size| {
+            let mut map = OpenMap::with_capacity(size);
+            for i in 0..size {
+                let mut key = [0u8; 33];
+                key[..8].copy_from_slice(&(i as u64).to_le_bytes());
+                map.insert(key, i as u128);
+            }
+            b.iter(|| {
+                let mut key = [0u8; 33];
+                key[..8].copy_from_slice(&(42u64).to_le_bytes());
+                map.get(&key)
+            });
+        });
+    }
+    group.finish();
+}
+
+// TODO: Add kangaroo vs BSGS benchmark. This requires setting up a SearchEngine
+// and ScanParams, which is complex enough to defer to a follow-up task.
+
 criterion_group!(
     benches,
     bench_scalar_invert,
-    bench_precompute,
-    bench_scalar_operations,
+    bench_derive_affine_constants,
+    bench_derive_private_key,
     bench_point_multiplication,
     bench_search_chunk,
+    bench_openmap,
 );
 criterion_main!(benches);
