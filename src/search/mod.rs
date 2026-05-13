@@ -8,7 +8,7 @@ mod bsgs;
 mod openmap;
 mod parallel;
 mod params;
-mod rho;
+mod kangaroo;
 
 pub use params::ScanParams;
 
@@ -31,8 +31,8 @@ use std::time::Instant;
 pub const BSGS_THRESHOLD: u128 = 1 << 32;
 
 /// Maximum candidate count for which BSGS is used.
-/// Above this threshold Pollard's rho is selected automatically.
-pub const RHO_THRESHOLD: u128 = 1 << 48;
+/// Above this threshold Pollard's kangaroo is selected automatically.
+pub const KANGAROO_THRESHOLD: u128 = 1 << 48;
 
 /// Owned search engine that holds a reusable Rayon thread pool.
 ///
@@ -153,22 +153,23 @@ impl SearchEngine {
 
         let found = if total <= BSGS_THRESHOLD {
             parallel::scan(&self.pool, self.thread_count, &self.shutdown, &scan)
-        } else if total > RHO_THRESHOLD {
-            let rho_params = crate::search::params::RhoParams {
+        } else if total > KANGAROO_THRESHOLD {
+            let kangaroo_params = crate::search::params::KangarooParams {
                 g: ProjectivePoint::GENERATOR,
                 h: scan.target.into(),
                 alpha: scan.alpha,
                 beta: scan.beta,
                 start: scan.start,
                 step: scan.step,
+                total,
                 d: 16,
                 max_iterations: 10 * (total as f64).sqrt() as u64,
                 thread_count: self.thread_count,
                 pool: &self.pool,
                 shutdown: &self.shutdown,
             };
-            rho::search(
-                &self.pool, self.thread_count, &self.shutdown, &rho_params,
+            kangaroo::search(
+                &self.pool, self.thread_count, &self.shutdown, &kangaroo_params,
             )?
         } else {
             bsgs::search(
@@ -230,16 +231,16 @@ impl SearchEngine {
         parallel::scan(&self.pool, self.thread_count, &self.shutdown, scan)
     }
 
-    /// Test-only access to the Pollard's rho algorithm.
-    pub fn rho(
+    /// Test-only access to the Pollard's kangaroo algorithm.
+    pub fn kangaroo(
         &self,
-        rho_params: &crate::search::params::RhoParams,
+        kangaroo_params: &crate::search::params::KangarooParams,
     ) -> crate::error::Result<Option<i128>> {
-        rho::search(
+        kangaroo::search(
             &self.pool,
             self.thread_count,
             &self.shutdown,
-            rho_params,
+            kangaroo_params,
         )
     }
 }
