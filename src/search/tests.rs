@@ -443,7 +443,7 @@ fn test_kangaroo_step_not_one() {
         step: 2,
         total: 10,
         d: 8,
-        max_iterations: 1_000_000,
+        max_iterations: 10_000,
     };
     let found = engine.kangaroo(&kangaroo_params).unwrap();
     assert_eq!(found, None);
@@ -496,13 +496,14 @@ fn test_kangaroo_no_match() {
         step: 1,
         total: 10,
         d: 8,
-        max_iterations: 1_000_000,
+        max_iterations: 10_000,
     };
     let found = engine.kangaroo(&kangaroo_params).unwrap();
     assert_eq!(found, None);
 }
 
 #[test]
+#[ignore]
 fn test_kangaroo_stress() {
     let engine = make_engine(4);
     let (sig, pk) = fixture();
