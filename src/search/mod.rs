@@ -165,9 +165,6 @@ impl SearchEngine {
                 total,
                 d: 16,
                 max_iterations: 10 * (total as f64).sqrt() as u64,
-                thread_count: self.thread_count,
-                pool: &self.pool,
-                shutdown: &self.shutdown,
             };
             kangaroo::search(
                 &self.pool, self.thread_count, &self.shutdown, &kangaroo_params,

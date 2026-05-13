@@ -1,8 +1,6 @@
 //! Parameter structs consumed by the search algorithms.
 
-use crate::context::ShutdownToken;
 use k256::{ProjectivePoint, PublicKey, Scalar};
-use rayon::ThreadPool;
 /// Parameters shared by [`parallel_scan`](crate::search::parallel::scan) and
 /// [`bsgs::search`](crate::search::bsgs::search).
 pub struct ScanParams {
@@ -49,7 +47,7 @@ pub struct GiantStepParams<'a> {
 }
 
 /// Parameters for the Pollard's kangaroo bounded discrete-log search.
-pub struct KangarooParams<'a> {
+pub struct KangarooParams {
     /// Generator point `G`.
     pub g: ProjectivePoint,
     /// Target point `h = target`.
@@ -68,10 +66,4 @@ pub struct KangarooParams<'a> {
     pub d: u32,
     /// Maximum iterations per thread before giving up.
     pub max_iterations: u64,
-    /// Number of parallel worker threads.
-    pub thread_count: usize,
-    /// Rayon thread pool.
-    pub pool: &'a ThreadPool,
-    /// Cooperative shutdown token.
-    pub shutdown: &'a ShutdownToken,
 }

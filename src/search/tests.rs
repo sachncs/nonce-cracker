@@ -375,9 +375,6 @@ fn test_kangaroo_small_range() {
         total: 1000,
         d: 8, // lower d for small test
         max_iterations: 1_000_000,
-        thread_count: 4,
-        pool: &engine.pool,
-        shutdown: &engine.shutdown,
     };
     let found = engine.kangaroo(&kangaroo_params).unwrap();
     assert_eq!(found, Some(5));
@@ -407,9 +404,6 @@ fn test_kangaroo_shutdown() {
         total: 1000,
         d: 8,
         max_iterations: 1_000_000,
-        thread_count: 4,
-        pool: &engine.pool,
-        shutdown: &engine.shutdown,
     };
     let found = engine.kangaroo(&kangaroo_params).unwrap();
     assert_eq!(found, None);

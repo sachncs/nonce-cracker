@@ -1,5 +1,5 @@
 use rustc_hash::FxBuildHasher;
-use std::hash::{BuildHasher, Hash, Hasher};
+use std::hash::BuildHasher;
 
 const EMPTY: u8 = 0;
 const OCCUPIED: u8 = 1;
@@ -45,9 +45,7 @@ impl OpenMap {
     }
 
     fn hash(&self, key: &[u8; 33]) -> usize {
-        let mut hasher = self.hasher.build_hasher();
-        key[..8].hash(&mut hasher);
-        (hasher.finish() as usize) & self.mask
+        (self.hasher.hash_one(&key[..8]) as usize) & self.mask
     }
 
     /// Insert a key-value pair into the map.
@@ -101,6 +99,11 @@ impl OpenMap {
     /// Return the number of occupied entries.
     pub fn len(&self) -> usize {
         self.len
+    }
+
+    /// Return whether the map contains no entries.
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
     }
 
     /// Return the total number of slots in the table.
