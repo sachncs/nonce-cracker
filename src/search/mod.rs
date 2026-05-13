@@ -30,6 +30,10 @@ use std::time::Instant;
 /// Above this threshold the BSGS algorithm is selected automatically.
 pub const BSGS_THRESHOLD: u128 = 1 << 32;
 
+/// Maximum candidate count for which BSGS is used.
+/// Above this threshold Pollard's rho is selected automatically.
+pub const RHO_THRESHOLD: u128 = 1 << 48;
+
 /// Owned search engine that holds a reusable Rayon thread pool.
 ///
 /// Construct once and call [`SearchEngine::search`] for each query.
@@ -149,6 +153,23 @@ impl SearchEngine {
 
         let found = if total <= BSGS_THRESHOLD {
             parallel::scan(&self.pool, self.thread_count, &self.shutdown, &scan)
+        } else if total > RHO_THRESHOLD {
+            let rho_params = crate::search::params::RhoParams {
+                g: ProjectivePoint::GENERATOR,
+                h: scan.target.into(),
+                alpha: scan.alpha,
+                beta: scan.beta,
+                start: scan.start,
+                step: scan.step,
+                d: 16,
+                max_iterations: 10 * (total as f64).sqrt() as u64,
+                thread_count: self.thread_count,
+                pool: &self.pool,
+                shutdown: &self.shutdown,
+            };
+            rho::search(
+                &self.pool, self.thread_count, &self.shutdown, &rho_params,
+            )?
         } else {
             bsgs::search(
                 &self.pool,
@@ -207,6 +228,19 @@ impl SearchEngine {
     /// Test-only access to the parallel scan algorithm.
     pub fn parallel_scan(&self, scan: &ScanParams) -> Option<i128> {
         parallel::scan(&self.pool, self.thread_count, &self.shutdown, scan)
+    }
+
+    /// Test-only access to the Pollard's rho algorithm.
+    pub fn rho(
+        &self,
+        rho_params: &crate::search::params::RhoParams,
+    ) -> crate::error::Result<Option<i128>> {
+        rho::search(
+            &self.pool,
+            self.thread_count,
+            &self.shutdown,
+            rho_params,
+        )
     }
 }
 
