@@ -4,7 +4,7 @@ use crate::{
     context::ShutdownToken,
     crypto::derive_affine_constants,
     domain::{SearchSpec, Signature},
-    fixtures::{fixture, make_engine},
+    fixtures::{fixture, fixture_with_nonce, make_engine},
     metrics::TracingMetricsSink,
 };
 use k256::{elliptic_curve::sec1::ToEncodedPoint, ProjectivePoint, Scalar};
@@ -540,4 +540,82 @@ fn test_kangaroo_negative_start() {
     };
     let found = engine.kangaroo(&kangaroo_params).unwrap();
     assert_eq!(found, Some(5));
+}
+
+#[test]
+fn test_kangaroo_step_not_one_match() {
+    let engine = make_engine(4);
+    let (sig, pk) = fixture_with_nonce(9);
+    let (alpha, beta) = derive_affine_constants(&sig).unwrap();
+    let kangaroo_params = crate::search::params::KangarooParams {
+        g: ProjectivePoint::GENERATOR,
+        h: pk.into(),
+        alpha,
+        beta,
+        start: 0,
+        step: 3,
+        total: 10,
+        d: 8,
+        max_iterations: 1_000_000,
+    };
+    let found = engine.kangaroo(&kangaroo_params).unwrap();
+    assert_eq!(found, Some(9));
+}
+
+#[test]
+fn test_bsgs_step_not_one() {
+    let engine = make_engine(4);
+    let (sig, pk) = fixture_with_nonce(5);
+    let (alpha, beta) = derive_affine_constants(&sig).unwrap();
+    let step_point = ProjectivePoint::GENERATOR * (alpha * Scalar::from(5u64));
+    let scan = ScanParams {
+        target: pk,
+        start: 0,
+        step: 5,
+        total: 2,
+        alpha,
+        beta,
+        step_point,
+    };
+    let found = engine.bsgs(&scan).unwrap();
+    assert_eq!(found, Some(5));
+}
+
+#[test]
+fn test_parallel_scan_step_not_one() {
+    let engine = make_engine(4);
+    let (sig, pk) = fixture_with_nonce(5);
+    let (alpha, beta) = derive_affine_constants(&sig).unwrap();
+    let step_point = ProjectivePoint::GENERATOR * (alpha * Scalar::from(5u64));
+    let scan = ScanParams {
+        target: pk,
+        start: 0,
+        step: 5,
+        total: 2,
+        alpha,
+        beta,
+        step_point,
+    };
+    let found = engine.parallel_scan(&scan);
+    assert_eq!(found, Some(5));
+}
+
+#[test]
+fn test_kangaroo_params_invalid_d() {
+    let (sig, pk) = fixture();
+    let (alpha, beta) = derive_affine_constants(&sig).unwrap();
+    let params = crate::search::params::KangarooParams::new(
+        ProjectivePoint::GENERATOR,
+        pk.into(),
+        alpha,
+        beta,
+        0,
+        1,
+        1000,
+        300,
+        None,
+    );
+    assert!(params.is_err());
+    let err = params.unwrap_err().to_string();
+    assert!(err.contains("d=300 out of range"));
 }

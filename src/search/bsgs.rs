@@ -246,7 +246,7 @@ fn reconstruct_nonce(p: &GiantStepParams<'_>, k_giant: u64) -> Option<i128> {
             let Ok(candidate_i128) = i128::try_from(candidate) else {
                 return None;
             };
-            return Some(p.start + candidate_i128 * p.step);
+            return p.start.checked_add(candidate_i128.checked_mul(p.step)?);
         }
     }
     None

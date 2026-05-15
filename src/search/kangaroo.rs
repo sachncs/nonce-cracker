@@ -4,7 +4,7 @@
 //! interval [a, a + N]. Expected runtime: O(sqrt(N)) group operations.
 
 use crate::{context::ShutdownToken, error::Result, search::params::KangarooParams};
-use k256::{elliptic_curve::sec1::ToEncodedPoint, AffinePoint, ProjectivePoint, Scalar};
+use k256::{AffinePoint, ProjectivePoint, Scalar};
 use rayon::prelude::*;
 use rustc_hash::FxHashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -40,6 +40,8 @@ pub fn search(
     shutdown: &ShutdownToken,
     params: &KangarooParams,
 ) -> Result<Option<i128>> {
+    params.validate()?;
+
     // Degenerate case: alpha == 0 means all candidates have the same discrete log.
     if params.alpha == Scalar::ZERO {
         let d0_scalar = crate::crypto::derive_private_key(params.start, params.alpha, params.beta);
@@ -111,7 +113,7 @@ pub fn search(
                 iterations += 1;
 
                 // Advance tame kangaroo
-                let (new_tame, jump) = kangaroo_step(tame, &walk);
+                let (new_tame, tame_affine, jump) = kangaroo_step(tame, &walk);
                 tame = new_tame;
                 match tame_dist.checked_add(jump) {
                     Some(v) => tame_dist = v,
@@ -119,12 +121,11 @@ pub fn search(
                 }
 
                 // Store tame distinguished point
-                let tame_affine = tame.to_affine();
-                if is_distinguished(&tame_affine, walk.d) {
-                    let key = crate::crypto::affine_key(&tame_affine);
+                let tame_key = crate::crypto::affine_key(&tame_affine);
+                if is_distinguished_from_key(&tame_key, walk.d) {
                     {
                         let mut guard = table[tid].write().unwrap();
-                        guard.insert(key, tame_dist);
+                        guard.insert(tame_key, tame_dist);
                     }
                     let c = dp_count.fetch_add(1, Ordering::Relaxed);
                     if c > 0 && c % 10_000 == 9999 {
@@ -133,7 +134,7 @@ pub fn search(
                 }
 
                 // Advance wild kangaroo
-                let (new_wild, jump) = kangaroo_step(wild, &walk);
+                let (new_wild, wild_affine, jump) = kangaroo_step(wild, &walk);
                 wild = new_wild;
                 match wild_dist.checked_add(jump) {
                     Some(v) => wild_dist = v,
@@ -141,30 +142,36 @@ pub fn search(
                 }
 
                 // Check wild distinguished point against tame table
-                let wild_affine = wild.to_affine();
-                if is_distinguished(&wild_affine, walk.d) {
-                    let key = crate::crypto::affine_key(&wild_affine);
+                let wild_key = crate::crypto::affine_key(&wild_affine);
+                if is_distinguished_from_key(&wild_key, walk.d) {
                     for shard in table.iter() {
                         let guard = shard.read().unwrap();
-                        if let Some(&tame_d) = guard.get(&key) {
-                            // Collision found: k = start + step * (tame_dist - wild_dist)
-                            let delta = if tame_d >= wild_dist {
-                                tame_d - wild_dist
-                            } else {
-                                // This shouldn't happen for a valid collision, but handle gracefully
+                        if let Some(&tame_d) = guard.get(&wild_key) {
+                            // Collision found: compute candidate and verify it
+                            let delta = tame_d.abs_diff(wild_dist);
+                            let delta_i128 = delta as i128;
+                            let Some(step_delta) = params.step.checked_mul(delta_i128) else {
                                 continue;
                             };
-                            let candidate = params.start + params.step * delta as i128;
+                            let Some(candidate) = params.start.checked_add(step_delta) else {
+                                continue;
+                            };
                             // Verify candidate is in range
                             let idx = (candidate - params.start) / params.step;
                             if idx >= 0 && (idx as u128) < params.total {
-                                let _ = result.compare_exchange(
-                                    NOT_FOUND,
-                                    delta,
-                                    Ordering::SeqCst,
-                                    Ordering::Relaxed,
-                                );
-                                break 'walk;
+                                let verify_point = ProjectivePoint::GENERATOR
+                                    * crate::crypto::derive_private_key(
+                                        candidate, params.alpha, params.beta,
+                                    );
+                                if verify_point == params.h {
+                                    let _ = result.compare_exchange(
+                                        NOT_FOUND,
+                                        delta,
+                                        Ordering::SeqCst,
+                                        Ordering::Relaxed,
+                                    );
+                                    break 'walk;
+                                }
                             }
                         }
                     }
@@ -181,38 +188,44 @@ pub fn search(
     if val == NOT_FOUND {
         Ok(None)
     } else {
-        let candidate = params.start + params.step * (val as i128);
+        let delta_i128 = val as i128;
+        let candidate = params
+            .start
+            .checked_add(
+                params
+                    .step
+                    .checked_mul(delta_i128)
+                    .ok_or(crate::error::RangeError::RangeOverflow)?,
+            )
+            .ok_or(crate::error::RangeError::RangeOverflow)?;
         Ok(Some(candidate))
     }
 }
 
-fn kangaroo_step(point: ProjectivePoint, walk: &WalkParams) -> (ProjectivePoint, u64) {
+fn kangaroo_step(point: ProjectivePoint, walk: &WalkParams) -> (ProjectivePoint, AffinePoint, u64) {
     let affine = point.to_affine();
-    let encoded = affine.to_encoded_point(true);
-    let bytes = encoded.as_bytes();
+    let key = crate::crypto::affine_key(&affine);
     let hash = u64::from_le_bytes([
-        bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7], bytes[8],
+        key[1], key[2], key[3], key[4], key[5], key[6], key[7], key[8],
     ]);
     let idx = (hash as usize) % walk.jump_sizes.len();
     let jump = walk.jump_sizes[idx].distance;
-    (point + walk.jump_points[idx], jump)
+    (point + walk.jump_points[idx], affine, jump)
 }
 
-fn is_distinguished(point: &AffinePoint, d: u32) -> bool {
-    let encoded = point.to_encoded_point(true);
-    let bytes = encoded.as_bytes();
+fn is_distinguished_from_key(key: &[u8; 33], d: u32) -> bool {
     let full_bytes = (d / 8) as usize;
     let rem_bits = (d % 8) as usize;
 
     for i in 0..full_bytes {
-        if bytes[1 + i] != 0 {
+        if key[1 + i] != 0 {
             return false;
         }
     }
 
     if rem_bits > 0 {
         let mask = 0xFFu8 << (8 - rem_bits);
-        if (bytes[1 + full_bytes] & mask) != 0 {
+        if (key[1 + full_bytes] & mask) != 0 {
             return false;
         }
     }

@@ -45,12 +45,11 @@ pub fn scan(
             }
             let count = chunk.min(scan.total - chunk_start);
             let chunk_start_u64 = u64::try_from(chunk_start).expect("total fits in u64 for scan");
-            let chunk_start_i128 = i128::try_from(chunk_start).expect("total fits in i128");
+            let _chunk_start_i128 = i128::try_from(chunk_start).expect("total fits in i128");
 
             // Compute chunk start point via point addition instead of scalar mult.
             let offset = scan.step_point * Scalar::from(chunk_start_u64);
             let mut point = base_point + offset;
-            let mut d0 = scan.start + chunk_start_i128 * scan.step;
 
             let count_u64 = u64::try_from(count).expect("chunk fits in u64");
             let mut i = 0u64;
@@ -73,7 +72,6 @@ pub fn scan(
                         break;
                     }
                     point += scan.step_point;
-                    d0 = d0.wrapping_add(scan.step);
                 }
                 i = batch_end;
                 if local_found {
@@ -88,6 +86,10 @@ pub fn scan(
         None
     } else {
         let index = val as i128;
-        Some(scan.start + index * scan.step)
+        Some(
+            scan.start
+                .checked_add(index.checked_mul(scan.step).expect("index*step overflow despite SearchSpec validation"))
+                .expect("start+index*step overflow despite SearchSpec validation"),
+        )
     }
 }

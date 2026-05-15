@@ -72,9 +72,22 @@ pub fn init(log_dir: &Path, console: bool) -> Result<(), LoggingError> {
 
     let subscriber = tracing_subscriber::registry::Registry::default().with(env_filter);
 
+    let file2 = file
+        .try_clone()
+        .map_err(|e| LoggingError::Logger(format!("clone log file: {e}")))?;
     let fmt_layer = tracing_subscriber::fmt::layer()
         .compact()
-        .with_writer(move || file.try_clone().expect("clone log file"));
+        .with_writer(move || {
+            file2.try_clone().unwrap_or_else(|_| {
+                #[cfg(unix)]
+                let path = "/dev/null";
+                #[cfg(windows)]
+                let path = "NUL";
+                #[cfg(not(any(unix, windows)))]
+                let path = "/dev/null";
+                std::fs::OpenOptions::new().write(true).open(path).unwrap()
+            })
+        });
 
     if console {
         let console_layer = tracing_subscriber::fmt::layer()

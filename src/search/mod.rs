@@ -155,17 +155,17 @@ impl SearchEngine {
         let found = if total <= BSGS_THRESHOLD {
             parallel::scan(&self.pool, self.thread_count, &self.shutdown, &scan)
         } else if total > KANGAROO_THRESHOLD {
-            let kangaroo_params = crate::search::params::KangarooParams {
-                g: ProjectivePoint::GENERATOR,
-                h: scan.target.into(),
-                alpha: scan.alpha,
-                beta: scan.beta,
-                start: scan.start,
-                step: scan.step,
+            let kangaroo_params = crate::search::params::KangarooParams::new(
+                ProjectivePoint::GENERATOR,
+                scan.target.into(),
+                scan.alpha,
+                scan.beta,
+                scan.start,
+                scan.step,
                 total,
-                d: 16,
-                max_iterations: 10 * (total as f64).sqrt() as u64,
-            };
+                16,
+                None,
+            )?;
             kangaroo::search(
                 &self.pool,
                 self.thread_count,

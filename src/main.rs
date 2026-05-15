@@ -29,11 +29,13 @@ fn main() {
     {
         let shutdown = ctx.shutdown.clone();
         std::thread::spawn(move || {
-            let mut signals = signal_hook::iterator::Signals::new([
+            let Ok(mut signals) = signal_hook::iterator::Signals::new([
                 signal_hook::consts::SIGINT,
                 signal_hook::consts::SIGTERM,
-            ])
-            .expect("signals");
+            ]) else {
+                tracing::error!("failed to register signal handler; graceful shutdown unavailable");
+                return;
+            };
             for sig in signals.forever() {
                 if sig == signal_hook::consts::SIGINT || sig == signal_hook::consts::SIGTERM {
                     info!(signal = sig, "shutdown signal received");

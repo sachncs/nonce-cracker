@@ -105,6 +105,9 @@ pub enum EngineError {
     /// Pollard's kangaroo exceeded the iteration limit without finding a collision.
     #[error("kangaroo iteration limit exceeded")]
     KangarooTimeout,
+    /// Pollard's kangaroo parameters were invalid.
+    #[error("kangaroo parameters invalid: {0}")]
+    KangarooParamsInvalid(String),
 }
 
 /// Convenience alias used by every public function in this crate.

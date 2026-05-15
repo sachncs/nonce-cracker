@@ -3,7 +3,6 @@ use std::hash::BuildHasher;
 
 const EMPTY: u8 = 0;
 const OCCUPIED: u8 = 1;
-const TOMBSTONE: u8 = 2;
 
 struct Entry {
     key: [u8; 33],
@@ -45,7 +44,7 @@ impl OpenMap {
     }
 
     fn hash(&self, key: &[u8; 33]) -> usize {
-        (self.hasher.hash_one(&key[..8]) as usize) & self.mask
+        (self.hasher.hash_one(key) as usize) & self.mask
     }
 
     /// Insert a key-value pair into the map.
@@ -61,7 +60,7 @@ impl OpenMap {
             let step = i.wrapping_mul(i + 1) / 2;
             let idx = (base + step) & self.mask;
             let entry = &mut self.entries[idx];
-            if entry.state == EMPTY || entry.state == TOMBSTONE {
+            if entry.state == EMPTY {
                 *entry = Entry {
                     key,
                     value,

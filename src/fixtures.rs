@@ -51,6 +51,22 @@ pub fn sig_s(z: u64, r: Scalar, d: Scalar, nonce: u64) -> Scalar {
     (Scalar::from(z) + r * d) * Scalar::from(nonce).invert().unwrap()
 }
 
+/// A pre-built valid `(Signature, PublicKey)` with a custom nonce.
+pub fn fixture_with_nonce(nonce: u64) -> (Signature, PublicKey) {
+    let d = Scalar::from(0x3039u64);
+    let z = Scalar::from(1u64);
+    let r = r_from_nonce(nonce);
+    let s = sig_s(1, r, d, nonce);
+    let pk = PublicKey::from_sec1_bytes(
+        (ProjectivePoint::GENERATOR * d)
+            .to_affine()
+            .to_encoded_point(true)
+            .as_bytes(),
+    )
+    .unwrap();
+    (Signature::new(r, s, z), pk)
+}
+
 /// Create a [`SearchEngine`] with the given thread count for testing.
 pub fn make_engine(threads: usize) -> SearchEngine {
     let config = Config {

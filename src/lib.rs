@@ -1,3 +1,4 @@
+#![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
 //! High-speed parallel ECDSA private key recovery for secp256k1 using an affine

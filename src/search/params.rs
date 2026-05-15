@@ -47,6 +47,7 @@ pub struct GiantStepParams<'a> {
 }
 
 /// Parameters for the Pollard's kangaroo bounded discrete-log search.
+#[derive(Debug)]
 pub struct KangarooParams {
     /// Generator point `G`.
     pub g: ProjectivePoint,
@@ -66,4 +67,70 @@ pub struct KangarooParams {
     pub d: u32,
     /// Maximum iterations per thread before giving up.
     pub max_iterations: u64,
+}
+
+impl KangarooParams {
+    /// Create a new `KangarooParams` with validation.
+    ///
+    /// `max_iterations` defaults to `10 * sqrt(total)` if `None` is provided.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EngineError::KangarooParamsInvalid`] if `d == 0`, `d > 264`, or
+    /// `max_iterations == 0`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        g: ProjectivePoint,
+        h: ProjectivePoint,
+        alpha: Scalar,
+        beta: Scalar,
+        start: i128,
+        step: i128,
+        total: u128,
+        d: u32,
+        max_iterations: Option<u64>,
+    ) -> crate::error::Result<Self> {
+        if d == 0 || d > 264 {
+            return Err(crate::error::EngineError::KangarooParamsInvalid(format!("d={d} out of range [1, 264]")).into());
+        }
+        let max_iterations = max_iterations.unwrap_or_else(|| {
+            let total_f64 = total as f64;
+            (10.0 * total_f64.sqrt()).max(1.0) as u64
+        });
+        if max_iterations == 0 {
+            return Err(crate::error::EngineError::KangarooParamsInvalid("max_iterations must be > 0".into()).into());
+        }
+        // Validate that the full range fits in i128 to prevent silent overflow
+        let n = (total - 1) as i128;
+        let _ = start
+            .checked_add(n.checked_mul(step).ok_or(crate::error::RangeError::RangeOverflow)?)
+            .ok_or(crate::error::RangeError::RangeOverflow)?;
+        Ok(Self {
+            g,
+            h,
+            alpha,
+            beta,
+            start,
+            step,
+            total,
+            d,
+            max_iterations,
+        })
+    }
+
+    /// Validate existing parameters.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EngineError::KangarooParamsInvalid`] if `d == 0`, `d > 264`, or
+    /// `max_iterations == 0`.
+    pub fn validate(&self) -> crate::error::Result<()> {
+        if self.d == 0 || self.d > 264 {
+            return Err(crate::error::EngineError::KangarooParamsInvalid(format!("d={} out of range [1, 264]", self.d)).into());
+        }
+        if self.max_iterations == 0 {
+            return Err(crate::error::EngineError::KangarooParamsInvalid("max_iterations must be > 0".into()).into());
+        }
+        Ok(())
+    }
 }

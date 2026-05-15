@@ -34,16 +34,16 @@ impl ShutdownToken {
     /// Uses [`Ordering::SeqCst`] to ensure the signal is immediately visible
     /// to all worker threads on any platform.
     pub fn signal(&self) {
-        self.inner.store(true, Ordering::SeqCst);
+        self.inner.store(true, Ordering::Release);
     }
 
     /// Check whether shutdown has been requested.
     ///
-    /// Uses [`Ordering::SeqCst`]; paired with [`signal`](Self::signal) this
+    /// Uses [`Ordering::Acquire`]; paired with [`signal`](Self::signal) this
     /// guarantees that any signal set before this call is observed.
     #[must_use]
     pub fn is_signalled(&self) -> bool {
-        self.inner.load(Ordering::SeqCst)
+        self.inner.load(Ordering::Acquire)
     }
 }
 

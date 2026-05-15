@@ -8,7 +8,7 @@ use crate::domain::Signature;
 use crate::error::{CryptoError, Result};
 use k256::{
     ecdsa::{signature::hazmat::PrehashVerifier, Signature as EcdsaSignature, VerifyingKey},
-    elliptic_curve::{sec1::ToEncodedPoint, PrimeField},
+    elliptic_curve::PrimeField,
     AffinePoint, PublicKey, Scalar,
 };
 
@@ -220,16 +220,20 @@ pub fn scalar_hex(s: &Scalar) -> String {
 #[inline]
 #[must_use]
 pub fn affine_key(affine: &AffinePoint) -> [u8; 33] {
-    let enc = affine.to_encoded_point(true);
-    let bytes = enc.as_bytes();
+    use k256::elliptic_curve::point::AffineCoordinates;
+    let x = affine.x();
+    let x_bytes = x.as_ref();
+    let prefix = if affine.y_is_odd().into() { 0x03 } else { 0x02 };
     let mut key = [0u8; 33];
-    key[..bytes.len()].copy_from_slice(bytes);
+    key[0] = prefix;
+    key[1..].copy_from_slice(x_bytes);
     key
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use k256::elliptic_curve::sec1::ToEncodedPoint;
     use k256::ProjectivePoint;
 
     #[test]
@@ -308,7 +312,9 @@ mod tests {
     fn test_derive_private_key_i128_min() {
         let a = Scalar::from(1u64);
         let b = Scalar::from(2u64);
-        let _ = derive_private_key(i128::MIN, a, b);
+        let result = derive_private_key(i128::MIN, a, b);
+        let expected = b - a * Scalar::from(1u128 << 127);
+        assert_eq!(result, expected);
     }
 
     #[test]

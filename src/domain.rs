@@ -55,6 +55,11 @@ impl SearchSpec {
         if end < start {
             return Err(RangeError::EndBeforeStart.into());
         }
+        let span = end.checked_sub(start).ok_or(RangeError::RangeOverflow)?;
+        let n = span / step;
+        let _ = start
+            .checked_add(n.checked_mul(step).ok_or(RangeError::RangeOverflow)?)
+            .ok_or(RangeError::RangeOverflow)?;
         Ok(Self { start, end, step })
     }
 
@@ -114,5 +119,11 @@ mod tests {
     fn test_search_spec_valid() {
         let spec = SearchSpec::new(-5, 5, 1).unwrap();
         assert_eq!(spec.total().unwrap(), 11);
+    }
+
+    #[test]
+    fn test_search_spec_range_overflow() {
+        let err = SearchSpec::new(i128::MIN, i128::MAX, 1).unwrap_err();
+        assert!(err.to_string().contains("overflow"));
     }
 }
