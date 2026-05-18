@@ -1,0 +1,40 @@
+[package]
+name = "nonce-cracker-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[workspace]
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.nonce-cracker]
+path = ".."
+
+[[bin]]
+name = "parse_scalar"
+path = "fuzz_targets/parse_scalar.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "parse_pubkey"
+path = "fuzz_targets/parse_pubkey.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "parse_int"
+path = "fuzz_targets/parse_int.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "openmap"
+path = "fuzz_targets/openmap.rs"
+test = false
+doc = false

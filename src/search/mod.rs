@@ -14,14 +14,17 @@ mod params;
 pub use params::{KangarooParams, ScanParams};
 
 use crate::{
+    checkpoint::Checkpoint,
     config::Config,
     context::ShutdownToken,
-    crypto::{derive_affine_constants, derive_private_key},
+    crypto::{derive_affine_constants, derive_private_key, scalar_hex},
     domain::{SearchOutcome, SearchSpec, Signature},
     error::{EngineError, Result},
     metrics::{MetricsSink, SearchReport},
 };
-use k256::{AffinePoint, ProjectivePoint, PublicKey, Scalar};
+use k256::{
+    elliptic_curve::sec1::ToEncodedPoint, AffinePoint, ProjectivePoint, PublicKey, Scalar,
+};
 use rayon::ThreadPool;
 use std::sync::Arc;
 use std::time::Instant;
@@ -43,7 +46,9 @@ pub struct SearchEngine {
     thread_count: usize,
     shutdown: ShutdownToken,
     metrics: Arc<dyn MetricsSink + Send + Sync>,
-    bsgs_max_m: u64,
+    /// Optional directory where checkpoint files are written before each
+    /// search and removed on completion.
+    checkpoint_dir: Option<std::path::PathBuf>,
 }
 
 impl std::fmt::Debug for SearchEngine {
@@ -94,7 +99,7 @@ impl SearchEngine {
             thread_count,
             shutdown,
             metrics,
-            bsgs_max_m: bsgs::BSGS_MAX_M,
+            checkpoint_dir: Some(config.checkpoint_dir.clone()),
         })
     }
 
@@ -152,35 +157,81 @@ impl SearchEngine {
             step_point,
         };
 
+        let checkpoint_path = self.checkpoint_dir.as_ref().and_then(|dir| {
+            let cp = Checkpoint {
+                algorithm: if total <= BSGS_THRESHOLD {
+                    "scan".into()
+                } else if total > KANGAROO_THRESHOLD {
+                    "kangaroo".into()
+                } else {
+                    "bsgs".into()
+                },
+                start: spec.start,
+                step: spec.step,
+                total,
+                r_hex: scalar_hex(&sig.r),
+                s_hex: scalar_hex(&sig.s),
+                z_hex: scalar_hex(&sig.z),
+                pubkey_hex: hex::encode(
+                    target.as_affine().to_encoded_point(true).as_bytes(),
+                ),
+                last_index: None,
+            };
+            match crate::checkpoint::write(dir, &cp) {
+                Ok(path) => Some(path),
+                Err(e) => {
+                    tracing::warn!("failed to write checkpoint: {e}");
+                    None
+                }
+            }
+        });
+
         let found = if total <= BSGS_THRESHOLD {
             parallel::scan(&self.pool, self.thread_count, &self.shutdown, &scan)
-        } else if total > KANGAROO_THRESHOLD {
-            let kangaroo_params = crate::search::params::KangarooParams::new(
-                ProjectivePoint::GENERATOR,
-                scan.target.into(),
-                scan.alpha,
-                scan.beta,
-                scan.start,
-                scan.step,
-                total,
-                16,
-                None,
-            )?;
-            kangaroo::search(
-                &self.pool,
-                self.thread_count,
-                &self.shutdown,
-                &kangaroo_params,
-            )?
         } else {
-            bsgs::search(
-                &self.pool,
-                self.thread_count,
-                &self.shutdown,
-                self.bsgs_max_m,
-                &scan,
-            )?
+            // For medium ranges try BSGS first; fall back to kangaroo if the
+            // baby-step table would exceed the memory guard.
+            let bsgs_result = if total <= KANGAROO_THRESHOLD {
+                bsgs::search(
+                    &self.pool,
+                    self.thread_count,
+                    &self.shutdown,
+                    &scan,
+                )
+            } else {
+                Err(EngineError::BsgsMemoryLimit.into())
+            };
+            match bsgs_result {
+                Ok(result) => result,
+                Err(crate::error::Error::Engine(crate::error::EngineError::BsgsMemoryLimit)) => {
+                    tracing::warn!("BSGS memory limit exceeded; falling back to kangaroo");
+                    let kangaroo_params = crate::search::params::KangarooParams::new(
+                        ProjectivePoint::GENERATOR,
+                        scan.target.into(),
+                        scan.alpha,
+                        scan.beta,
+                        scan.start,
+                        scan.step,
+                        total,
+                        16,
+                        None,
+                    )?;
+                    kangaroo::search(
+                        &self.pool,
+                        self.thread_count,
+                        &self.shutdown,
+                        &kangaroo_params,
+                    )?
+                }
+                Err(e) => return Err(e),
+            }
         };
+
+        if let Some(path) = checkpoint_path {
+            if let Err(e) = crate::checkpoint::remove(&path) {
+                tracing::warn!("failed to remove checkpoint {}: {e}", path.display());
+            }
+        }
 
         let outcome = SearchOutcome::new(found, alpha, beta);
         self.emit_metrics(start_time, &outcome);
@@ -199,20 +250,19 @@ impl SearchEngine {
 
 #[cfg(test)]
 impl SearchEngine {
-    /// Test-only constructor that allows overriding BSGS parameters.
+    /// Test-only constructor.
     pub fn with_params(
         pool: ThreadPool,
         thread_count: usize,
         shutdown: ShutdownToken,
         metrics: Arc<dyn MetricsSink + Send + Sync>,
-        bsgs_max_m: u64,
     ) -> Self {
         Self {
             pool,
             thread_count,
             shutdown,
             metrics,
-            bsgs_max_m,
+            checkpoint_dir: None,
         }
     }
 
@@ -222,7 +272,6 @@ impl SearchEngine {
             &self.pool,
             self.thread_count,
             &self.shutdown,
-            self.bsgs_max_m,
             scan,
         )
     }

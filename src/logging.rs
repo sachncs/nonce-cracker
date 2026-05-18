@@ -16,11 +16,37 @@ use std::{
     fs::File,
     io::{self, Write},
     path::Path,
+    sync::atomic::{AtomicBool, Ordering},
+    sync::Arc,
 };
 use tracing::Level;
 use tracing_subscriber::{
     filter::LevelFilter, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter,
 };
+
+/// Type-erased log writer that never panics.
+///
+/// Falls back to an in-memory sink if file cloning fails.
+enum LogWriter {
+    File(File),
+    Sink(io::Sink),
+}
+
+impl Write for LogWriter {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        match self {
+            LogWriter::File(f) => f.write(buf),
+            LogWriter::Sink(s) => s.write(buf),
+        }
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        match self {
+            LogWriter::File(f) => f.flush(),
+            LogWriter::Sink(s) => s.flush(),
+        }
+    }
+}
 
 const DEFAULT_LOG_FILE: &str = "nonce-cracker.log";
 
@@ -46,10 +72,8 @@ pub enum LoggingError {
 /// an unrecognised value, or [`LoggingError::Logger`] if the log file cannot be
 /// opened or cloned.
 ///
-/// # Panics
-///
-/// Panics if the log file handle cannot be cloned for the tracing layer
-/// writer.  This only occurs for invalid file descriptors.
+/// The file writer falls back to an in-memory buffer if cloning fails,
+/// so this function never panics due to descriptor exhaustion.
 pub fn init(log_dir: &Path, console: bool) -> Result<(), LoggingError> {
     let level = match std::env::var("NONCE_CRACKER_LOG_LEVEL") {
         Ok(v) => parse_level(&v)?,
@@ -66,26 +90,20 @@ pub fn init(log_dir: &Path, console: bool) -> Result<(), LoggingError> {
         .open(&log_path)
         .map_err(|e| LoggingError::Logger(e.to_string()))?;
 
-    let _ = file
-        .try_clone()
-        .map_err(|e| LoggingError::Logger(format!("clone log file: {e}")))?;
-
     let subscriber = tracing_subscriber::registry::Registry::default().with(env_filter);
 
     let file2 = file
         .try_clone()
         .map_err(|e| LoggingError::Logger(format!("clone log file: {e}")))?;
+    let sink_warned = Arc::new(AtomicBool::new(false));
     let fmt_layer = tracing_subscriber::fmt::layer()
         .compact()
         .with_writer(move || {
-            file2.try_clone().unwrap_or_else(|_| {
-                #[cfg(unix)]
-                let path = "/dev/null";
-                #[cfg(windows)]
-                let path = "NUL";
-                #[cfg(not(any(unix, windows)))]
-                let path = "/dev/null";
-                std::fs::OpenOptions::new().write(true).open(path).unwrap()
+            file2.try_clone().map(LogWriter::File).unwrap_or_else(|_| {
+                if !sink_warned.swap(true, Ordering::SeqCst) {
+                    eprintln!("warning: log file descriptor clone failed; logging to null sink");
+                }
+                LogWriter::Sink(std::io::sink())
             })
         });
 
@@ -116,7 +134,9 @@ pub fn emit_summary(level: Level, message: impl fmt::Display, console: bool) {
         Level::TRACE => tracing::trace!("{message}"),
     }
     if console {
-        let _ = writeln!(io::stdout().lock(), "{message}");
+        if let Err(e) = writeln!(io::stdout().lock(), "{message}") {
+            tracing::warn!("failed to write summary to stdout: {e}");
+        }
     }
 }
 

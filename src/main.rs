@@ -25,24 +25,15 @@ fn main() {
 
     let ctx = AppContext::new(config);
 
-    #[cfg(unix)]
     {
         let shutdown = ctx.shutdown.clone();
-        std::thread::spawn(move || {
-            let Ok(mut signals) = signal_hook::iterator::Signals::new([
-                signal_hook::consts::SIGINT,
-                signal_hook::consts::SIGTERM,
-            ]) else {
-                tracing::error!("failed to register signal handler; graceful shutdown unavailable");
-                return;
-            };
-            for sig in signals.forever() {
-                if sig == signal_hook::consts::SIGINT || sig == signal_hook::consts::SIGTERM {
-                    info!(signal = sig, "shutdown signal received");
-                    shutdown.signal();
-                    break;
-                }
-            }
+        ctrlc::set_handler(move || {
+            info!("shutdown signal received");
+            shutdown.signal();
+        })
+        .unwrap_or_else(|e| {
+            eprintln!("failed to register signal handler: {e}");
+            std::process::exit(1);
         });
     }
 

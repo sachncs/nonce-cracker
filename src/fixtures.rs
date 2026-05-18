@@ -72,6 +72,7 @@ pub fn make_engine(threads: usize) -> SearchEngine {
     let config = Config {
         max_threads: threads,
         log_dir: std::env::temp_dir(),
+        checkpoint_dir: std::env::temp_dir().join("checkpoints"),
         version: "test",
     };
     SearchEngine::new(

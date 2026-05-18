@@ -21,6 +21,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 use tracing::Level;
+use zeroize::Zeroize;
 
 /// Top-level CLI parsed by `clap`.
 #[derive(Parser, Debug)]
@@ -75,7 +76,7 @@ pub struct SearchArgs {
 /// Available CLI subcommands.
 #[derive(Subcommand, Debug)]
 pub enum Commands {
-    /// Search for a private key given two ECDSA signatures.
+    /// Search for a private key given a single ECDSA signature.
     #[command(name = "run")]
     Search(Box<SearchArgs>),
     /// Run the built-in demonstration.
@@ -117,11 +118,14 @@ pub fn run_search(ctx: &AppContext, args: &SearchArgs) -> Result<()> {
     if let Some(parent) = out.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let mut log = BufWriter::new(File::create(&out)?);
+    let tmp = out.with_extension(format!("tmp.{}", std::process::id()));
+    let mut log = BufWriter::new(File::create(&tmp)?);
 
     let outcome = engine.search(&spec, &sig, &target)?;
 
     write_outcome(&mut log, &outcome, !args.quiet)?;
+    drop(log);
+    std::fs::rename(&tmp, &out)?;
     Ok(())
 }
 
@@ -164,11 +168,14 @@ pub fn run_example(ctx: &AppContext) -> Result<()> {
     if let Some(parent) = out.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let mut log = BufWriter::new(File::create(&out)?);
+    let tmp = out.with_extension(format!("tmp.{}", std::process::id()));
+    let mut log = BufWriter::new(File::create(&tmp)?);
 
     let outcome = engine.search(&spec, &sig, &pk)?;
 
     write_outcome(&mut log, &outcome, true)?;
+    drop(log);
+    std::fs::rename(&tmp, &out)?;
     Ok(())
 }
 
@@ -178,7 +185,7 @@ fn write_outcome(log: &mut BufWriter<File>, outcome: &SearchOutcome, console: bo
     writeln!(log, "beta:  0x{}", scalar_hex(&outcome.beta))?;
 
     if let Some(nonce) = outcome.nonce {
-        let d = derive_private_key(nonce, outcome.alpha, outcome.beta);
+        let mut d = derive_private_key(nonce, outcome.alpha, outcome.beta);
         let hex = scalar_hex(&d);
         writeln!(log, "FOUND nonce={nonce} d=0x{hex}")?;
         emit_summary(
@@ -186,6 +193,7 @@ fn write_outcome(log: &mut BufWriter<File>, outcome: &SearchOutcome, console: bo
             format!("event=search_result status=found nonce={nonce} d=0x{hex}"),
             console,
         );
+        d.zeroize();
     } else {
         writeln!(log, "No key found in searched range.")?;
         emit_summary(Level::WARN, "event=search_result status=missing", console);
@@ -263,6 +271,7 @@ mod tests {
         let config = Config {
             max_threads: 4,
             log_dir: std::env::temp_dir(),
+            checkpoint_dir: std::env::temp_dir().join("checkpoints"),
             version: "test",
         };
         let ctx = AppContext::new(config);
@@ -292,6 +301,7 @@ mod tests {
         let config = Config {
             max_threads: 4,
             log_dir: std::env::temp_dir(),
+            checkpoint_dir: std::env::temp_dir().join("checkpoints"),
             version: "test",
         };
         let ctx = AppContext::new(config);
@@ -321,6 +331,7 @@ mod tests {
         let config = Config {
             max_threads: 4,
             log_dir: std::env::temp_dir(),
+            checkpoint_dir: std::env::temp_dir().join("checkpoints"),
             version: "test",
         };
         let ctx = AppContext::new(config);
@@ -405,6 +416,7 @@ mod tests {
         let config = Config {
             max_threads: 4,
             log_dir: std::env::temp_dir(),
+            checkpoint_dir: std::env::temp_dir().join("checkpoints"),
             version: "test",
         };
         let ctx = AppContext::new(config);

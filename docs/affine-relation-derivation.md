@@ -1,16 +1,7 @@
 # Affine Relation Derivation
 
-This document proves that the implementation in `derive_affine_constants`
-matches the two ECDSA signature equations under the nonce relation
-`k2 = k1 + delta` in the scalar field modulo the secp256k1 curve order `n`.
-
-The derivation is intentionally aligned with the code:
-
-- `u` corresponds to the modular inverse of `s1`
-- `a`, `b`, and `c` are the linear coefficients extracted from the two
-  signatures
-- `alpha` and `beta` are the final constants used by the search
-- `delta` is the bounded signed search variable passed in by the CLI
+This document proves the correctness of `derive_affine_constants` for the
+single-signature ECDSA nonce-search attack implemented in `crypto.rs`.
 
 ## Assumptions
 
@@ -18,182 +9,188 @@ Let:
 
 - `n` be the secp256k1 curve order
 - `d` be the private key
-- `z1`, `z2` be the message hashes reduced modulo `n`
-- `r1`, `r2` be the ECDSA `r` values
-- `s1`, `s2` be the ECDSA `s` values
-- `k1` be the first nonce
-- `k2 = k1 + delta` be the second nonce
+- `z` be the message hash reduced modulo `n`
+- `r` be the ECDSA `r` value
+- `s` be the ECDSA `s` value
+- `k` be the nonce used to produce the signature
+- `G` be the generator point
+- `Q = d * G` be the public key
 
 ECDSA gives:
 
 ```text
-s1 = k1^-1 (z1 + r1 d) mod n
-s2 = k2^-1 (z2 + r2 d) mod n
+r = (k * G).x mod n
+s = k^-1 (z + r d) mod n
 ```
 
-Substituting `k2 = k1 + delta`:
+## Step 1: Solve for the private key `d`
+
+Starting from the signature equation:
 
 ```text
-s1 = k1^-1 (z1 + r1 d) mod n
-s2 = (k1 + delta)^-1 (z2 + r2 d) mod n
+s = k^-1 (z + r d) mod n
 ```
 
-## Step 1: Eliminate `k1`
-
-From the first equation:
+Multiply both sides by `k`:
 
 ```text
-s1 k1 = z1 + r1 d   (mod n)
-k1 = s1^-1 (z1 + r1 d)   (mod n)
+s k = z + r d   (mod n)
 ```
+
+Rearrange to isolate `d`:
+
+```text
+r d = s k - z   (mod n)
+```
+
+If `r` is invertible modulo `n`, multiply both sides by `r^-1`:
+
+```text
+d = r^-1 s k - r^-1 z   (mod n)
+```
+
+## Step 2: Define the affine constants (positive beta form)
 
 Define:
 
 ```text
-u = s1^-1 mod n
+alpha = r^-1 s   (mod n)
+beta  = r^-1 z   (mod n)
 ```
 
 Then:
 
 ```text
-k1 = u (z1 + r1 d)   (mod n)
+d = alpha * k - beta   (mod n)
 ```
 
-## Step 2: Substitute into the second signature equation
+This is the canonical formulation: `beta` is always positive and `d` is a line
+in `k` with slope `alpha` and intercept `-beta`.
 
-Starting from:
+## Step 3: Reformulate as a pure multiplicative search
+
+Let `k0 = beta * alpha^-1 (mod n)`.  This is the nonce that would make
+`alpha * k - beta = 0` if it were in range.  Rewrite `d` in terms of the
+displacement `delta = k - k0`:
 
 ```text
-s2 (k1 + delta) = z2 + r2 d   (mod n)
+d = alpha * k - beta
+  = alpha * (k0 + delta) - beta
+  = alpha * k0 + alpha * delta - beta
 ```
 
-Substitute `k1 = u (z1 + r1 d)`:
+Since `alpha * k0 = beta` by construction:
 
 ```text
-s2 (u (z1 + r1 d) + delta) = z2 + r2 d   (mod n)
+d = alpha * delta   (mod n)
 ```
 
-Expand:
+where `delta = k - k0 (mod n)`.
+
+**Why this helps:** the public-key equation becomes
 
 ```text
-s2 u z1 + s2 u r1 d + s2 delta = z2 + r2 d   (mod n)
+Q = d * G = alpha * delta * G
 ```
 
-Move all terms involving `d` to the left and the rest to the right:
+so the search target is the point `delta * (alpha * G)`.  The algorithm
+precomputes `T = Q` and `step_point = G * (alpha * step)`, then walks
+through candidate deltas until `delta * step_point = T`.
+
+Once a match is found, recover the nonce:
 
 ```text
-(s2 u r1 - r2) d = z2 - s2 u z1 - s2 delta   (mod n)
+k = k0 + delta   (mod n)
 ```
 
-This is the key linear relation.
-
-## Step 3: Match the implementation variables
-
-The code defines:
+and the private key:
 
 ```text
-a = s2 * r1 * u - r2   (mod n)
-b = z2 - s2 * z1 * u   (mod n)
-c = s2                 (mod n)
+d = alpha * k - beta   (mod n)
 ```
 
-So the equation becomes:
+## Step 4: Match the implementation
+
+The code computes `derive_affine_constants` as:
+
+1. `r_inv = r.invert()` (returns `None` if `r` is not invertible)
+2. `alpha = r_inv * s`
+3. `beta = r_inv * z`
+
+This matches the positive-beta form above directly, so
 
 ```text
-a d = b - c delta   (mod n)
+d = alpha * k - beta
 ```
 
-If `a` is invertible modulo `n`, multiply both sides by `a^-1`:
+The search logic uses `k0 = beta * alpha^-1`, which is the canonical
+positive-beta convention.  All downstream equations (`d = alpha * delta`,
+etc.) remain unchanged.
+
+## Step 5: Why the search works
+
+Given the public key `Q = d * G`, substitute the affine relation:
 
 ```text
-d = a^-1 (b - c delta)   (mod n)
+Q = (alpha * k - beta) * G
+Q + beta * G = alpha * k * G
+Q + beta * G = k * (alpha * G)
 ```
 
-Distribute:
+The implementation precomputes:
+
+- `alpha` and `beta` from the signature
+- The target point `T = Q + beta * G`
+- The step point `step_point = G * (alpha * step)`
+
+It then searches for an integer `k` in `[start, end]` such that:
 
 ```text
-d = (a^-1 b) + (-a^-1 c) delta   (mod n)
+k * (alpha * G) = T
 ```
 
-Reorder terms:
+Which is equivalent to:
 
 ```text
-d = alpha * delta + beta   (mod n)
+(alpha * k - beta) * G = Q
 ```
 
-where:
+When such a `k` is found, the private key is recovered as:
 
 ```text
-alpha = -c * a^-1   (mod n)
-beta  =  b * a^-1   (mod n)
+d = alpha * k - beta   (mod n)
 ```
 
-These are exactly the values computed by `derive_affine_constants`.
+## Step 6: Implementation correctness
 
-## Step 4: Why the implementation is correct
+All operations are performed directly in the secp256k1 scalar field using the
+`k256::Scalar` type, which automatically reduces every intermediate value
+modulo `n`. Because the field is prime, every nonzero element has a unique
+multiplicative inverse.
 
-The function computes:
+The only nontrivial precondition is invertibility of `r` modulo `n`. When `r`
+has no inverse, the implementation returns `CryptoError::RNotInvertible`
+instead of fabricating a candidate key.
 
-1. `u = s1.invert()` (returns `None` if `s1` is not invertible)
-2. `a = s2 * r1 * u - r2`
-3. `b = z2 - s2 * z1 * u`
-4. `c = s2`
-5. `a_inv = a.invert()` (returns `None` if `a` is not invertible)
-6. `alpha = -(c * a_inv)`
-7. `beta = b * a_inv`
+## Signed search range
 
-Because all operations are performed directly in the secp256k1 scalar field
-using the `k256::Scalar` type, every intermediate value is automatically
-reduced modulo `n`. The `Scalar` type guarantees that all values are valid
-field elements in `[0, n)`.
+The search code treats `k` as a bounded signed integer, but the math is still
+modulo `n`. A negative `k` is just the additive inverse of its positive
+magnitude in the scalar field, so the same derivation applies.
 
-The search then evaluates:
+The implementation computes `d(k)` for negative `k` as:
 
 ```text
-d(delta) = alpha * delta + beta   (mod n)
+d = -(alpha * |k|) - beta   (mod n)
 ```
 
-which is algebraically equivalent to the derived form above.
-
-### Proof sketch
-
-The code uses `k256::Scalar` for all arithmetic, which is a prime-field type
-that enforces reduction modulo `n` on every operation. Because the field is a
-prime field, every nonzero element has a unique multiplicative inverse. The only
-nontrivial precondition is invertibility of `s1` and `a` modulo `n`. When those
-inverses exist, the computed `alpha` and `beta` are uniquely defined, and the
-search evaluates the same affine function derived above.
-
-## Failure condition
-
-If `a` is not invertible modulo `n`, then the equation
-
-```text
-a d = b - c delta   (mod n)
-```
-
-does not yield a unique `d`. In that case the implementation correctly
-returns an error instead of fabricating a candidate key.
-
-## Signed delta note
-
-The search code treats `delta` as a bounded signed integer, but the math is
-still modulo `n`. A negative `delta` is just the additive inverse of its
-positive magnitude in the scalar field, so the same derivation applies.
-
-The implementation computes `d(delta)` for negative delta as:
-
-```text
-d = beta - alpha * |delta|   (mod n)
-```
-
-which is equivalent to `alpha * delta + beta` because `delta = -|delta|`.
+which is equivalent to `alpha * k - beta` because `k = -|k|`.
 
 ## Complexity
 
-- **Derivation time:** dominated by two scalar inversions (extended Euclidean
+- **Derivation time:** Dominated by one scalar inversion (extended Euclidean
   algorithm) and a handful of field multiplications/additions.
-- **Derivation space:** constant — only a few `Scalar` temporaries.
-- **Search mapping:** the derived equation is a single affine evaluation per
-  candidate delta, which matches the `O(N)` scan loop or `O(sqrt(N))` BSGS
-  loop in `src/main.rs`.
+- **Derivation space:** Constant — only a few `Scalar` temporaries.
+- **Search mapping:** The derived equation requires one affine evaluation per
+  candidate, which matches the `O(N)` scan loop or `O(sqrt(N))` BSGS loop in
+  `src/search/mod.rs`.

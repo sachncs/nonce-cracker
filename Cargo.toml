@@ -1,6 +1,6 @@
 [package]
 name = "nonce-cracker"
-version = "0.2.0"
+version = "0.6.0"
 edition = "2021"
 authors = ["nonce-cracker contributors"]
 license = "MIT OR Apache-2.0"
@@ -14,12 +14,14 @@ readme = "README.md"
 
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }
+ctrlc = "3.4"
 hex = "0.4"
 k256 = { version = "0.13", default-features = false, features = ["arithmetic", "ecdsa", "pkcs8", "std"] }
 rand = "0.8"
 rayon = "1.8"
 rustc-hash = "2"
 signal-hook = "0.3"
+zeroize = { version = "1.8", features = ["derive"] }
 tracing = { version = "0.1", features = ["attributes"] }
 thiserror = "1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
@@ -27,6 +29,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 [dev-dependencies]
 assert_cmd = "2"
 criterion = "0.5"
+k256 = "0.13"
+proptest = "1.6"
 rand = "0.8"
 
 [[bench]]
@@ -41,3 +45,6 @@ opt-level = 3
 codegen-units = 1
 lto = "thin"
 panic = "abort"
+
+[patch.crates-io]
+k256 = { path = "patches/k256" }

@@ -138,6 +138,7 @@ fn bench_kangaroo(c: &mut Criterion) {
         &Config {
             max_threads: 4,
             log_dir: std::env::temp_dir(),
+            checkpoint_dir: std::env::temp_dir().join("checkpoints"),
             version: "test",
         },
         Some(4),
@@ -150,17 +151,18 @@ fn bench_kangaroo(c: &mut Criterion) {
     let h = ProjectivePoint::GENERATOR * Scalar::from(0x3039u64);
 
     group.bench_function("small_range_1000", |b| {
-        let kangaroo_params = KangarooParams {
-            g: ProjectivePoint::GENERATOR,
+        let kangaroo_params = KangarooParams::new(
+            ProjectivePoint::GENERATOR,
             h,
             alpha,
             beta,
-            start: 0,
-            step: 1,
-            total: 1000,
-            d: 8,
-            max_iterations: 1_000_000,
-        };
+            0,
+            1,
+            1000,
+            8,
+            Some(1_000_000),
+        )
+        .unwrap();
         b.iter(|| {
             engine.kangaroo(&kangaroo_params).unwrap();
         });

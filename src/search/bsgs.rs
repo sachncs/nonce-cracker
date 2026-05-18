@@ -1,8 +1,7 @@
 //! Baby-Step Giant-Step (BSGS) discrete-log search.
 //!
-//! Implements the classic BSGS algorithm with batched point normalization,
-//! parallel giant-step evaluation, and segmented operation for ranges that
-//! would otherwise require excessive memory for the baby-step table.
+//! Implements the classic BSGS algorithm with batched point normalization
+//! and parallel giant-step evaluation.
 
 use crate::{
     context::ShutdownToken,
@@ -15,30 +14,43 @@ use k256::{elliptic_curve::BatchNormalize, AffinePoint, ProjectivePoint, Scalar}
 use rayon::prelude::*;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use tracing::info;
 
 /// Maximum baby-step table size (in entries) to prevent unbounded memory use.
 ///
 /// At `2^27` entries the OpenMap consumes roughly 10 GB.
 pub const BSGS_MAX_M: u64 = 1 << 27;
 /// Compressed encoding of the identity point, used as a sentinel key.
-const IDENTITY_KEY: [u8; 33] = [0u8; 33];
+///
+/// On secp256k1 (prime order), the identity point encodes as `0x02` + 32 zero bytes.
+///
+/// # Safety invariant
+///
+/// This sentinel is only correct because secp256k1 has prime order, so the
+/// identity point has a unique compressed encoding.  On a curve with a cofactor
+/// the identity could have multiple representations and this assumption would
+/// break.
+const IDENTITY_KEY: [u8; 33] = {
+    let mut k = [0u8; 33];
+    k[0] = 0x02;
+    k
+};
 /// Number of giant-step points processed in one batch-normalize call.
 const BATCH: u64 = 8192;
 
 /// Run the Baby-Step Giant-Step search over the given [`ScanParams`].
 ///
-/// Automatically selects the standard in-memory BSGS when `m <= bsgs_max_m`,
-/// or falls back to a segmented (disk-friendly) approach for larger ranges.
-///
 /// Returns the nonce index if found, or `None` if the target is not in range.
+/// Returns an error if the required baby-step table would exceed the
+/// configured memory guard.
 pub fn search(
     pool: &rayon::ThreadPool,
     thread_count: usize,
     shutdown: &ShutdownToken,
-    bsgs_max_m: u64,
     scan: &ScanParams,
 ) -> Result<Option<i128>> {
+    debug_assert_eq!(affine_key(&AffinePoint::IDENTITY), IDENTITY_KEY,
+        "IDENTITY_KEY sentinel must match AffinePoint::IDENTITY encoding");
+
     let target_affine: AffinePoint = *scan.target.as_affine();
     let d0_scalar = crate::crypto::derive_private_key(scan.start, scan.alpha, scan.beta);
     let d0_point = ProjectivePoint::GENERATOR * d0_scalar;
@@ -58,89 +70,38 @@ pub fn search(
         m = 1;
     }
 
-    if m <= u128::from(bsgs_max_m) {
-        let m_u64 = u64::try_from(m).map_err(|_| EngineError::BsgsMOverflow)?;
-        let baby_map = pool.install(|| build_baby_steps(0, m_u64, scan.step_point, thread_count));
-        let m_step = scan.step_point * Scalar::from(m_u64);
-        let params = GiantStepParams {
-            t,
-            m: m_u64,
-            m_step,
-            total: scan.total,
-            thread_count,
-            step_point: scan.step_point,
-            start: scan.start,
-            step: scan.step,
-            baby_map: &baby_map,
-            pool,
-            shutdown,
-        };
-        Ok(run_giant_steps(&params).and_then(|k| reconstruct_nonce(&params, k)))
-    } else {
-        let segment_size = u128::from(bsgs_max_m);
-        let num_segments = m.div_ceil(segment_size);
-        info!(
-            bsgs_mode = "segmented",
-            m = m,
-            segments = num_segments,
-            segment_size = segment_size,
-            "starting segmented BSGS"
-        );
-
-        let result = Arc::new(AtomicU64::new(u64::MAX));
-
-        for seg in 0..num_segments {
-            if shutdown.is_signalled() || result.load(Ordering::SeqCst) != u64::MAX {
-                break;
-            }
-
-            let seg_start = seg * segment_size;
-            let seg_end = ((seg + 1) * segment_size).min(m);
-            let seg_len =
-                u64::try_from(seg_end - seg_start).map_err(|_| EngineError::BsgsSegmentOverflow)?;
-
-            if seg_len == 0 {
-                continue;
-            }
-
-            let baby_map = pool
-                .install(|| build_baby_steps(seg_start, seg_len, scan.step_point, thread_count));
-
-            let m_u64 = u64::try_from(m).map_err(|_| EngineError::BsgsMOverflow)?;
-            let m_step = scan.step_point * Scalar::from(m_u64);
-            let params = GiantStepParams {
-                t,
-                m: m_u64,
-                m_step,
-                total: scan.total,
-                thread_count,
-                step_point: scan.step_point,
-                start: scan.start,
-                step: scan.step,
-                baby_map: &baby_map,
-                pool,
-                shutdown,
-            };
-            let found = run_giant_steps(&params);
-
-            if let Some(k) = found {
-                return Ok(reconstruct_nonce(&params, k));
-            }
-
-            let pct_whole = (seg + 1) * 100 / num_segments;
-            let pct_frac = ((seg + 1) * 1000 / num_segments) % 10;
-            if seg % 4 == 3 || seg + 1 == num_segments {
-                info!(
-                    segment = seg + 1,
-                    total_segments = num_segments,
-                    pct = format!("{pct_whole}.{pct_frac}"),
-                    "BSGS progress"
-                );
-            }
-        }
-
-        Ok(None)
+    if m > u128::from(BSGS_MAX_M) {
+        return Err(EngineError::BsgsMemoryLimit.into());
     }
+
+    let m_u64 = u64::try_from(m).map_err(|_| EngineError::BsgsMOverflow)?;
+
+    // Expected peak memory: per-thread OpenMaps at 0.7 load factor.
+    // Entry size is 64 bytes.  Cap at ~8 GB to prevent OOM on typical machines.
+    const BSGS_MEMORY_LIMIT_BYTES: u64 = 8 * 1024 * 1024 * 1024;
+    let per_thread_cap = ((m_u64 as f64 / thread_count as f64 / 0.7).ceil() as u64)
+        .next_power_of_two();
+    let expected_bytes = thread_count as u64 * per_thread_cap * 64;
+    if expected_bytes > BSGS_MEMORY_LIMIT_BYTES {
+        return Err(EngineError::BsgsMemoryLimit.into());
+    }
+
+    let baby_maps = pool.install(|| build_baby_steps(0, m_u64, scan.step_point, thread_count));
+    let m_step = scan.step_point * Scalar::from(m_u64);
+    let params = GiantStepParams {
+        t,
+        m: m_u64,
+        m_step,
+        total: scan.total,
+        thread_count,
+        step_point: scan.step_point,
+        start: scan.start,
+        step: scan.step,
+        baby_maps: &baby_maps,
+        pool,
+        shutdown,
+    };
+    Ok(run_giant_steps(&params).and_then(|k| reconstruct_nonce(&params, k)))
 }
 
 fn run_giant_steps(p: &GiantStepParams<'_>) -> Option<u64> {
@@ -158,8 +119,14 @@ fn run_giant_steps(p: &GiantStepParams<'_>) -> Option<u64> {
                 return;
             }
 
-            let chunk_start_u64 = u64::try_from(chunk_start).expect("chunk_start fits in u64");
-            let chunk_end_u64 = u64::try_from(chunk_end).expect("chunk_end fits in u64");
+            let Ok(chunk_start_u64) = u64::try_from(chunk_start) else {
+                tracing::warn!("BSGS chunk_start overflow; skipping thread");
+                return;
+            };
+            let Ok(chunk_end_u64) = u64::try_from(chunk_end) else {
+                tracing::warn!("BSGS chunk_end overflow; skipping thread");
+                return;
+            };
             // Compute step_point * m * chunk_start via two scalar muls to avoid
             // u128/u64 overflow of the intermediate product.
             let offset = p.m_step * Scalar::from(chunk_start_u64);
@@ -177,7 +144,7 @@ fn run_giant_steps(p: &GiantStepParams<'_>) -> Option<u64> {
                 let mut current = giant;
                 for idx in 0..(batch_end - i) {
                     if current == ProjectivePoint::IDENTITY {
-                        if let Some(&j) = p.baby_map.get(&IDENTITY_KEY) {
+                        if let Some(j) = lookup_in_shards(p.baby_maps, &IDENTITY_KEY) {
                             let k = (u128::from(i) + u128::from(idx)) * u128::from(p.m) + j;
                             if k < p.total {
                                 let _ = result.compare_exchange(
@@ -186,6 +153,7 @@ fn run_giant_steps(p: &GiantStepParams<'_>) -> Option<u64> {
                                     Ordering::SeqCst,
                                     Ordering::Relaxed,
                                 );
+                                // Another thread may have already stored a result.
                                 return;
                             }
                         }
@@ -203,7 +171,7 @@ fn run_giant_steps(p: &GiantStepParams<'_>) -> Option<u64> {
                     for (affine_idx, affine) in affines.iter().enumerate() {
                         let idx = indices[affine_idx];
                         let key = affine_key(affine);
-                        if let Some(&j) = p.baby_map.get(&key) {
+                        if let Some(j) = lookup_in_shards(p.baby_maps, &key) {
                             let k = (u128::from(i) + u128::from(idx)) * u128::from(p.m) + j;
                             if k < p.total {
                                 let _ = result.compare_exchange(
@@ -212,6 +180,7 @@ fn run_giant_steps(p: &GiantStepParams<'_>) -> Option<u64> {
                                     Ordering::SeqCst,
                                     Ordering::Relaxed,
                                 );
+                                // Another thread may have already stored a result.
                                 return;
                             }
                         }
@@ -235,18 +204,30 @@ fn run_giant_steps(p: &GiantStepParams<'_>) -> Option<u64> {
 fn reconstruct_nonce(p: &GiantStepParams<'_>, k_giant: u64) -> Option<i128> {
     let km = u128::from(k_giant) * u128::from(p.m);
     let point = p.t - p.step_point * Scalar::from(km);
-    let lookup = if point == ProjectivePoint::IDENTITY {
-        p.baby_map.get(&IDENTITY_KEY)
+    let key = if point == ProjectivePoint::IDENTITY {
+        IDENTITY_KEY
     } else {
-        p.baby_map.get(&affine_key(&point.to_affine()))
+        affine_key(&point.to_affine())
     };
-    if let Some(&j) = lookup {
+    if let Some(j) = lookup_in_shards(p.baby_maps, &key) {
         let candidate = km + j;
         if candidate < p.total {
             let Ok(candidate_i128) = i128::try_from(candidate) else {
+                tracing::warn!("BSGS candidate exceeds i128 range; skipping valid match");
                 return None;
             };
             return p.start.checked_add(candidate_i128.checked_mul(p.step)?);
+        }
+    }
+    None
+}
+
+/// Look up a key across all sharded baby-step tables.
+#[inline]
+fn lookup_in_shards(baby_maps: &[OpenMap], key: &[u8; 33]) -> Option<u128> {
+    for map in baby_maps {
+        if let Some(&value) = map.get(key) {
+            return Some(value);
         }
     }
     None
@@ -257,7 +238,7 @@ fn build_baby_steps(
     len: u64,
     step_point: ProjectivePoint,
     thread_count: usize,
-) -> OpenMap {
+) -> Vec<OpenMap> {
     let maps: Vec<OpenMap> = (0..thread_count)
         .into_par_iter()
         .map(|tid| {
@@ -310,11 +291,17 @@ fn build_baby_steps(
         })
         .collect();
 
-    let mut merged = OpenMap::with_capacity(usize::try_from(len).expect("len fits in usize"));
-    for map in maps {
-        for (key, value) in map {
-            merged.insert(key, value);
-        }
+    maps
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn identity_key_matches_affine_identity() {
+        // Verify the sentinel key matches k256's actual identity encoding.
+        // This assumption relies on secp256k1 being prime-order.
+        assert_eq!(affine_key(&AffinePoint::IDENTITY), IDENTITY_KEY);
     }
-    merged
 }

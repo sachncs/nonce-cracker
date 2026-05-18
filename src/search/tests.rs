@@ -48,34 +48,6 @@ fn test_bsgs_medium_range() {
     assert_eq!(found, Some(5));
 }
 
-#[test]
-fn test_segmented_bsgs() {
-    let (sig, pk) = fixture();
-    let (alpha, beta) = derive_affine_constants(&sig).unwrap();
-    let step_point = ProjectivePoint::GENERATOR * (alpha * Scalar::from(1u64));
-    let pool = rayon::ThreadPoolBuilder::new()
-        .num_threads(4)
-        .build()
-        .unwrap();
-    let engine = SearchEngine::with_params(
-        pool,
-        4,
-        ShutdownToken::new(),
-        Arc::new(TracingMetricsSink),
-        50,
-    );
-    let scan = ScanParams {
-        target: pk,
-        start: 0,
-        step: 1,
-        total: 10_000,
-        alpha,
-        beta,
-        step_point,
-    };
-    let found = engine.bsgs(&scan).unwrap();
-    assert_eq!(found, Some(5));
-}
 
 #[test]
 fn test_engine_debug() {
@@ -96,6 +68,7 @@ fn test_thread_cap_warning() {
     let config = Config {
         max_threads: 2,
         log_dir: std::env::temp_dir(),
+        checkpoint_dir: std::env::temp_dir().join("checkpoints"),
         version: "test",
     };
     let engine = SearchEngine::new(
@@ -225,6 +198,7 @@ fn test_parallel_scan_shutdown() {
     let config = Config {
         max_threads: 4,
         log_dir: std::env::temp_dir(),
+        checkpoint_dir: std::env::temp_dir().join("checkpoints"),
         version: "test",
     };
     let engine =
@@ -243,60 +217,6 @@ fn test_parallel_scan_shutdown() {
 }
 
 #[test]
-fn test_segmented_bsgs_no_match() {
-    let (sig, pk) = fixture();
-    let (alpha, beta) = derive_affine_constants(&sig).unwrap();
-    let step_point = ProjectivePoint::GENERATOR * (alpha * Scalar::from(1u64));
-    let pool = rayon::ThreadPoolBuilder::new()
-        .num_threads(4)
-        .build()
-        .unwrap();
-    let engine = SearchEngine::with_params(
-        pool,
-        4,
-        ShutdownToken::new(),
-        Arc::new(TracingMetricsSink),
-        50,
-    );
-    let scan = ScanParams {
-        target: pk,
-        start: 10,
-        step: 1,
-        total: 10_000,
-        alpha,
-        beta,
-        step_point,
-    };
-    let found = engine.bsgs(&scan).unwrap();
-    assert_eq!(found, None);
-}
-
-#[test]
-fn test_segmented_bsgs_shutdown() {
-    let (sig, pk) = fixture();
-    let (alpha, beta) = derive_affine_constants(&sig).unwrap();
-    let step_point = ProjectivePoint::GENERATOR * (alpha * Scalar::from(1u64));
-    let pool = rayon::ThreadPoolBuilder::new()
-        .num_threads(4)
-        .build()
-        .unwrap();
-    let shutdown = ShutdownToken::new();
-    shutdown.signal();
-    let engine = SearchEngine::with_params(pool, 4, shutdown, Arc::new(TracingMetricsSink), 50);
-    let scan = ScanParams {
-        target: pk,
-        start: 0,
-        step: 1,
-        total: 10_000,
-        alpha,
-        beta,
-        step_point,
-    };
-    let found = engine.bsgs(&scan).unwrap();
-    assert_eq!(found, None);
-}
-
-#[test]
 fn test_giant_steps_shutdown() {
     let (sig, pk) = fixture();
     let (alpha, beta) = derive_affine_constants(&sig).unwrap();
@@ -306,6 +226,7 @@ fn test_giant_steps_shutdown() {
     let config = Config {
         max_threads: 4,
         log_dir: std::env::temp_dir(),
+        checkpoint_dir: std::env::temp_dir().join("checkpoints"),
         version: "test",
     };
     let engine =
@@ -390,7 +311,7 @@ fn test_kangaroo_shutdown() {
         .unwrap();
     let shutdown = ShutdownToken::new();
     shutdown.signal();
-    let engine = SearchEngine::with_params(pool, 4, shutdown, Arc::new(TracingMetricsSink), 50);
+    let engine = SearchEngine::with_params(pool, 4, shutdown, Arc::new(TracingMetricsSink));
     let kangaroo_params = crate::search::params::KangarooParams {
         g: ProjectivePoint::GENERATOR,
         h: pk.into(),
@@ -457,7 +378,7 @@ fn test_kangaroo_alpha_zero() {
     assert_eq!(alpha, Scalar::ZERO);
 
     let target = k256::PublicKey::from_sec1_bytes(
-        (ProjectivePoint::GENERATOR * beta)
+        (ProjectivePoint::GENERATOR * (Scalar::ZERO - beta))
             .to_affine()
             .to_encoded_point(true)
             .as_bytes(),
@@ -500,7 +421,6 @@ fn test_kangaroo_no_match() {
 }
 
 #[test]
-#[ignore]
 fn test_kangaroo_stress() {
     let engine = make_engine(4);
     let (sig, pk) = fixture();
@@ -573,6 +493,26 @@ fn test_bsgs_step_not_one() {
         start: 0,
         step: 5,
         total: 2,
+        alpha,
+        beta,
+        step_point,
+    };
+    let found = engine.bsgs(&scan).unwrap();
+    assert_eq!(found, Some(5));
+}
+
+#[test]
+fn test_bsgs_negative_start() {
+    let engine = make_engine(4);
+    let (sig, pk) = fixture_with_nonce(5);
+    let (alpha, beta) = derive_affine_constants(&sig).unwrap();
+    let step_point = ProjectivePoint::GENERATOR * (alpha * Scalar::from(1u64));
+    // Nonce 5 is in [-10, 10] with step 1.
+    let scan = ScanParams {
+        target: pk,
+        start: -10,
+        step: 1,
+        total: 21,
         alpha,
         beta,
         step_point,

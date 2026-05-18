@@ -50,10 +50,15 @@ impl OpenMap {
     /// Insert a key-value pair into the map.
     ///
     /// If the key already exists, its value is overwritten.
+    /// Automatically grows the table when the load factor reaches ~0.7.
     pub fn insert(&mut self, key: [u8; 33], value: u128) {
-        if self.len >= self.entries.len() {
-            panic!("OpenMap is full: cannot insert into a saturated table");
+        if self.entries.is_empty() || self.len * 10 >= self.entries.len() * 7 {
+            self.grow();
         }
+        self.insert_internal(key, value);
+    }
+
+    fn insert_internal(&mut self, key: [u8; 33], value: u128) {
         let base = self.hash(&key);
         let mut i = 0usize;
         loop {
@@ -74,6 +79,25 @@ impl OpenMap {
                 return;
             }
             i += 1;
+        }
+    }
+
+    fn grow(&mut self) {
+        let old_entries = std::mem::take(&mut self.entries);
+        let new_cap = old_entries.len().max(1).next_power_of_two() * 2;
+        let mut new_entries = Vec::with_capacity(new_cap);
+        new_entries.resize_with(new_cap, || Entry {
+            key: [0u8; 33],
+            value: 0u128,
+            state: EMPTY,
+        });
+        self.entries = new_entries;
+        self.mask = new_cap - 1;
+        self.len = 0;
+        for entry in old_entries {
+            if entry.state == OCCUPIED {
+                self.insert_internal(entry.key, entry.value);
+            }
         }
     }
 
@@ -147,6 +171,7 @@ impl Iterator for OpenMapIntoIter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
 
     #[test]
     fn basic_insert_and_get() {
@@ -219,5 +244,40 @@ mod tests {
             assert_eq!(map.get(&key), Some(&(i as u128)));
         }
         assert_eq!(map.len(), n as usize);
+    }
+
+    proptest! {
+        #[test]
+        fn prop_insert_get_roundtrip(key in any::<[u8; 33]>(), value in any::<u128>()) {
+            let mut map = OpenMap::with_capacity(1024);
+            map.insert(key, value);
+            prop_assert_eq!(map.get(&key), Some(&value));
+            prop_assert_eq!(map.len(), 1);
+        }
+
+        #[test]
+        fn prop_overwrite(key in any::<[u8; 33]>(), v1 in any::<u128>(), v2 in any::<u128>()) {
+            let mut map = OpenMap::with_capacity(1024);
+            map.insert(key, v1);
+            map.insert(key, v2);
+            prop_assert_eq!(map.get(&key), Some(&v2));
+            prop_assert_eq!(map.len(), 1);
+        }
+
+        #[test]
+        fn prop_many_entries(
+            entries in prop::collection::vec((any::<[u8; 33]>(), any::<u128>()), 1..512)
+        ) {
+            let mut map = OpenMap::with_capacity(entries.len());
+            let mut expected = std::collections::HashMap::new();
+            for (key, value) in &entries {
+                map.insert(*key, *value);
+                expected.insert(*key, *value);
+            }
+            for (key, value) in &expected {
+                prop_assert_eq!(map.get(key), Some(value));
+            }
+            prop_assert_eq!(map.len(), expected.len());
+        }
     }
 }

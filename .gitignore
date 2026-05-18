@@ -18,6 +18,16 @@ Thumbs.db
 *.log
 !example.log
 
+# Runtime directories created by the tool
+logs/
+checkpoints/
+
+# Proptest regression seeds
+proptest-regressions/
+
+# Temporary atomic-write files
+*.tmp.*
+
 # Environment
 .env
 .env.local

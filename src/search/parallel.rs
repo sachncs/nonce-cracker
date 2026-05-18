@@ -44,8 +44,17 @@ pub fn scan(
                 return;
             }
             let count = chunk.min(scan.total - chunk_start);
-            let chunk_start_u64 = u64::try_from(chunk_start).expect("total fits in u64 for scan");
-            let _chunk_start_i128 = i128::try_from(chunk_start).expect("total fits in i128");
+            let Ok(chunk_start_u64) = u64::try_from(chunk_start) else {
+                tracing::warn!("parallel scan chunk_start overflow; skipping thread");
+                return;
+            };
+            let _chunk_start_i128 = match i128::try_from(chunk_start) {
+                Ok(v) => v,
+                Err(_) => {
+                    tracing::warn!("parallel scan chunk_start i128 overflow; skipping thread");
+                    return;
+                }
+            };
 
             // Compute chunk start point via point addition instead of scalar mult.
             let offset = scan.step_point * Scalar::from(chunk_start_u64);
@@ -68,6 +77,7 @@ pub fn scan(
                             Ordering::SeqCst,
                             Ordering::Relaxed,
                         );
+                        // Another thread may have already stored a result.
                         local_found = true;
                         break;
                     }

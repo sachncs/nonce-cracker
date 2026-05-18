@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- `Signature` no longer implements `Copy`; it implements `Zeroize` + `Drop` to clear sensitive scalars from memory on drop.
+- `SearchOutcome` no longer implements `Clone`; it implements `Zeroize` + `Drop` to prevent duplicated secrets.
+- Zeroize temporary `r_inv` and nonce scalars in `derive_affine_constants` and `derive_private_key`.
+- Zeroize the recovered private key `d` in `write_outcome` after logging.
+
+### Added
+- Deterministic seeded RNG for Pollard's kangaroo: seed derived from `alpha ^ beta ^ start ^ step` ensures reproducible walks.
+- `KangarooParams::new` constructor validates `d` range `[1, 264]` and `max_iterations > 0`.
+- BSGS automatic fallback to kangaroo when the expected baby-step memory exceeds 8 GB.
+- Cross-platform signal handling via `ctrlc` crate replaces Unix-only `signal_hook`.
+- `debug_assert!` verifying `IDENTITY_KEY` matches `AffinePoint::IDENTITY` encoding.
+- Explicit prime-order assumption documentation in BSGS identity-point sentinel.
+- Expected memory check in BSGS before table allocation.
+- Minimal checkpoint/resume scaffolding: `Checkpoint` struct with text serialization, `NONCE_CRACKER_CHECKPOINT_DIR` config, and write/remove around `SearchEngine::search`.
+- Property-based tests (`proptest`) for `OpenMap` round-trip, `parse_int`, and `derive_private_key` invariants.
+- `cargo-fuzz` harness under `fuzz/` with targets for `parse_scalar`, `parse_pubkey`, `parse_int`, and `openmap`.
+- Local `patches/k256/` fork exposing `ProjectivePoint::projective_x()` and `projective_z()` accessors to enable projective-coordinate hashing in the kangaroo hot path.
+
+### Changed
+- **BSGS baby-step table is now sharded**: per-thread `OpenMap`s are kept separate; giant-step lookups scan all shards. Eliminates the 2× memory peak from sequential merging.
+- `SearchOutcome` no longer implements `Copy` (implements `Zeroize` + `Drop` instead).
+- `GiantStepParams.baby_map` renamed to `baby_maps` and changed to `&[OpenMap]`.
+- **Pollard's kangaroo no longer converts to affine on every step**: `kangaroo_step` now hashes the projective `(X, Z)` pair via a minimal k256 patch (`projective_x` / `projective_z` accessors) to select the jump size.  Affine conversion only happens when storing or checking a distinguished point.  Eliminates ~2 field inversions per loop iteration (~100× speedup on the hot path).
+- **Affine relation updated to positive-beta formulation**: `beta = r^-1 * z` (positive), `d = alpha * k - beta`.  `derive_affine_constants` and `derive_private_key` updated accordingly.  Documentation (`README.md`, `docs/affine-relation-derivation.md`) aligned.
+
+### Fixed
+- `file.try_clone().expect()` panic in logging replaced with `LogWriter` enum and `io::Sink` fallback.
+- Removed dead `bsgs_max_m` test-only field from production `SearchEngine` struct.
+- Removed dead segmented BSGS code path (quadratic blowup).
+- `OpenMap::insert` auto-grows table at 0.7 load factor instead of panicking on saturation.
+- **Checkpoint I/O no longer silently swallowed**: `write` failures are logged with `warn!`; `remove` returns `io::Result<()>` and failures are logged.
+- **Hardened checkpoint deserialization**: `Checkpoint::read_from` now rejects malformed lines, unknown keys, and missing required fields instead of silently substituting defaults.
+- **Signal-handler failure is fatal**: `ctrlc::set_handler` error now exits the process instead of logging and continuing without graceful shutdown.
+- **Logging Sink fallback is visible**: emits a one-time `eprintln!` warning when the log file descriptor cannot be cloned.
+- **Stdout write failures are visible**: `emit_summary` now logs a `warn!` when `writeln!` to stdout fails (e.g. broken pipe).
+- **RwLock poisoning no longer aborts**: kangaroo DP table locks use `unwrap_or_else(|e| e.into_inner())` to recover from poisoned locks instead of panicking.
+- **Rayon thread panics eliminated**: `.expect()` calls inside BSGS and parallel-scan closures replaced with `let else` early returns that log a warning and skip the thread.
+- **Kangaroo overflow paths are visible**: `tame_dist` and `wild_dist` `u64` overflows, and `step * delta` `i128` overflows, are logged with `warn!` instead of silently breaking the walk.
+- **BSGS reconstruct_nonce overflow is visible**: `i128::try_from(candidate)` failure is logged with `warn!` instead of silently returning `None`.
+- **Atomic report-file writes**: `run_search` and `run_example` write to a temp file and `rename` atomically on success, preventing empty/corrupted report files on crash.
+- **Explicit CAS race documentation**: all `compare_exchange` return-value discards in scan, BSGS, and kangaroo are annotated with comments explaining the benign race.
+
+## [0.6.0] - 2026-05-15
+
 ### Added
 - Pollard's kangaroo (lambda) method for bounded-range discrete-log search for ranges > 2^48.
 - `OpenMap`: custom open-addressing hash map reducing BSGS memory by ~25%.
@@ -16,7 +61,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `EngineError::ThreadCountZero` guard against `threads=0`.
 - `EngineError::KangarooTimeout` for iteration limit exceeded in kangaroo search.
 - Support for decimal input in `parse_scalar` (previously hex-only).
-- `examples/bench_bsgs.rs`: End-to-end BSGS benchmark for random nonces in configurable ranges (2^32 to 2^52).
+- `examples/bench_bsgs.rs`: end-to-end BSGS benchmark for random nonces in configurable ranges (2^32 to 2^52).
 
 ### Changed
 - BSGS_MAX_M increased from 2^26 to 2^27 (~10 GB).

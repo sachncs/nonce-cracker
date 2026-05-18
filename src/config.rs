@@ -17,6 +17,8 @@ use std::path::PathBuf;
 pub const MAX_THREADS_DEFAULT: usize = 256;
 /// Default log output directory.
 pub const LOG_DIR_DEFAULT: &str = "logs";
+/// Default checkpoint output directory.
+pub const CHECKPOINT_DIR_DEFAULT: &str = "checkpoints";
 
 /// Configuration loaded from environment variables.
 ///
@@ -27,6 +29,9 @@ pub struct Config {
     pub max_threads: usize,
     /// Directory where log files and search reports are written.
     pub log_dir: PathBuf,
+    /// Directory where checkpoint files are written before (and removed after)
+    /// each search.
+    pub checkpoint_dir: PathBuf,
     /// Crate version (from `CARGO_PKG_VERSION`).
     pub version: &'static str,
 }
@@ -66,6 +71,7 @@ impl Config {
     pub fn from_env() -> Result<Self, ConfigError> {
         let max_threads = parse_env_usize("NONCE_CRACKER_MAX_THREADS", MAX_THREADS_DEFAULT)?;
         let log_dir = parse_env_path("NONCE_CRACKER_LOG_DIR", LOG_DIR_DEFAULT)?;
+        let checkpoint_dir = parse_env_path("NONCE_CRACKER_CHECKPOINT_DIR", CHECKPOINT_DIR_DEFAULT)?;
 
         if max_threads == 0 {
             return Err(ConfigError::MaxThreadsZero);
@@ -77,6 +83,7 @@ impl Config {
         Ok(Self {
             max_threads,
             log_dir,
+            checkpoint_dir,
             version: env!("CARGO_PKG_VERSION"),
         })
     }
@@ -117,6 +124,7 @@ mod tests {
         let cfg = Config {
             max_threads: MAX_THREADS_DEFAULT,
             log_dir: PathBuf::from(LOG_DIR_DEFAULT),
+            checkpoint_dir: PathBuf::from(CHECKPOINT_DIR_DEFAULT),
             version: "0.0.0",
         };
         assert_eq!(cfg.max_threads, MAX_THREADS_DEFAULT);

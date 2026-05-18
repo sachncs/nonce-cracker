@@ -33,7 +33,7 @@ nonce-cracker is a CPU-intensive application designed for high-performance ECDSA
 | Disk | 10 GB | 100+ GB (for large search ranges) |
 | Network | None required | N/A |
 
-For BSGS searches (ranges > 2^32 candidates), memory scales with `O(sqrt(N))` up to a maximum of ~5 GB at the BSGS memory guard (`BSGS_MAX_M = 2^26`).
+For BSGS searches (ranges > 2^32 candidates), memory scales with `O(sqrt(N))` up to a maximum of ~10 GB at the BSGS memory guard (`BSGS_MAX_M = 2^27`).
 
 ### Software Requirements
 
@@ -58,8 +58,8 @@ docker run --rm \
   -e NONCE_CRACKER_MAX_THREADS=8 \
   -v $(pwd)/logs:/app/logs \
   nonce-cracker:latest run \
-  --r1 0x... --r2 0x... --s1 0x... --s2 0x... \
-  --z1 0x... --z2 0x... --pubkey 0x...
+  --r 0x... --s 0x... --z 0x... \
+  --pubkey 0x...
 ```
 
 ### Production Dockerfile
@@ -199,18 +199,12 @@ spec:
         command:
         - /app/nonce-cracker
         - run
-        - --r1
-        - "$(R1)"
-        - --r2
-        - "$(R2)"
-        - --s1
-        - "$(S1)"
-        - --s2
-        - "$(S2)"
-        - --z1
-        - "$(Z1)"
-        - --z2
-        - "$(Z2)"
+        - --r
+        - "$(R)"
+        - --s
+        - "$(S)"
+        - --z
+        - "$(Z)"
         - --pubkey
         - "$(PUBKEY)"
         - --start
@@ -218,11 +212,11 @@ spec:
         - --end
         - "$(END)"
         env:
-        - name: R1
+        - name: R
           valueFrom:
             secretKeyRef:
               name: signature-data
-              key: r1
+              key: r
         # ... other signature values
         - name: NONCE_CRACKER_LOG_LEVEL
           value: "info"
@@ -261,9 +255,9 @@ For production deployments, signature data should be stored as Kubernetes Secret
 
 ```bash
 kubectl create secret generic signature-data \
-  --from-literal=r1=0x... \
-  --from-literal=s1=0x... \
-  --from-literal=z1=0x... \
+  --from-literal=r=0x... \
+  --from-literal=s=0x... \
+  --from-literal=z=0x... \
   --namespace=nonce-cracker
 ```
 
@@ -274,7 +268,7 @@ kubectl create secret generic signature-data \
 The application emits structured metrics logs:
 
 ```
-2026-04-23T01:44:00.123456Z INFO nonce-cracker::metrics: event="search_complete" found=true delta=1 elapsed_sec=0.123 threads=8
+2026-04-23T01:44:00.123456Z INFO nonce-cracker::metrics: event="search_complete" found=true nonce=4660 elapsed_sec=0.123 threads=8
 ```
 
 ### Health Checks
@@ -328,13 +322,13 @@ The production image:
 apiVersion: v1
 kind: ConfigMap
 data:
-  r1: "0xdeadbeef..."  # DON'T DO THIS
+  r: "0xdeadbeef..."  # DON'T DO THIS
 
 # Good: Reference to Secret
 apiVersion: v1
 kind: ConfigMap
 data:
-  r1: "$(R1)"  # Reference from env
+  r: "$(R)"  # Reference from env
 ```
 
 ## Troubleshooting

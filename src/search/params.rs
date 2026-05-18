@@ -38,8 +38,9 @@ pub struct GiantStepParams<'a> {
     pub start: i128,
     /// Step between candidates.
     pub step: i128,
-    /// Baby-step table mapping compressed point to step index.
-    pub baby_map: &'a crate::search::openmap::OpenMap,
+    /// Baby-step tables (sharded by build thread) mapping compressed point to
+    /// step index.  Lookups must scan all shards.
+    pub baby_maps: &'a [crate::search::openmap::OpenMap],
     /// Rayon thread pool for parallel giant-step evaluation.
     pub pool: &'a rayon::ThreadPool,
     /// Cooperative shutdown token.
@@ -47,26 +48,29 @@ pub struct GiantStepParams<'a> {
 }
 
 /// Parameters for the Pollard's kangaroo bounded discrete-log search.
+///
+/// Fields are `pub(crate)` to enforce construction via the validated
+/// [`KangarooParams::new`] constructor.
 #[derive(Debug)]
 pub struct KangarooParams {
     /// Generator point `G`.
-    pub g: ProjectivePoint,
+    pub(crate) g: ProjectivePoint,
     /// Target point `h = target`.
-    pub h: ProjectivePoint,
+    pub(crate) h: ProjectivePoint,
     /// Affine slope `alpha` from the signature.
-    pub alpha: Scalar,
+    pub(crate) alpha: Scalar,
     /// Affine intercept `beta` from the signature.
-    pub beta: Scalar,
+    pub(crate) beta: Scalar,
     /// First nonce candidate in the search range.
-    pub start: i128,
+    pub(crate) start: i128,
     /// Step between candidates.
-    pub step: i128,
+    pub(crate) step: i128,
     /// Total number of candidates.
-    pub total: u128,
+    pub(crate) total: u128,
     /// Number of bits that must be zero for a distinguished point (default 16).
-    pub d: u32,
+    pub(crate) d: u32,
     /// Maximum iterations per thread before giving up.
-    pub max_iterations: u64,
+    pub(crate) max_iterations: u64,
 }
 
 impl KangarooParams {

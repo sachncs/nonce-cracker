@@ -13,8 +13,8 @@ use std::sync::Arc;
 /// Clones share the same underlying flag so that a signal handler
 /// can signal shutdown and worker threads can observe it.
 ///
-/// All operations use sequential consistency ([`Ordering::SeqCst`]) to ensure
-/// that a signal delivered on one thread is immediately visible to all workers.
+/// `signal` uses [`Ordering::Release`] and `is_signalled` uses [`Ordering::Acquire`],
+/// guaranteeing that a signal set before a load is observed.
 #[derive(Debug, Clone)]
 pub struct ShutdownToken {
     inner: Arc<AtomicBool>,
@@ -99,6 +99,7 @@ mod tests {
         let config = Config {
             max_threads: 4,
             log_dir: std::path::PathBuf::from("/tmp"),
+            checkpoint_dir: std::path::PathBuf::from("/tmp/checkpoints"),
             version: "test",
         };
         let ctx = AppContext::new(config);

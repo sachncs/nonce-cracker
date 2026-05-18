@@ -108,6 +108,9 @@ pub enum EngineError {
     /// Pollard's kangaroo parameters were invalid.
     #[error("kangaroo parameters invalid: {0}")]
     KangarooParamsInvalid(String),
+    /// BSGS range exceeds the configured memory guard.
+    #[error("BSGS memory limit exceeded")]
+    BsgsMemoryLimit,
 }
 
 /// Convenience alias used by every public function in this crate.

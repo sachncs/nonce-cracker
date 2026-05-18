@@ -17,6 +17,7 @@
 //! let (alpha, beta) = derive_affine_constants(&sig).unwrap();
 //! ```
 
+mod checkpoint;
 mod config;
 mod context;
 mod crypto;
@@ -30,6 +31,7 @@ pub mod search;
 pub mod fixtures;
 
 // Stable public API
+pub use checkpoint::Checkpoint;
 pub use config::Config;
 pub use config::ConfigError;
 pub use context::{AppContext, ShutdownToken};

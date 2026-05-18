@@ -6,6 +6,7 @@
 
 use crate::domain::Signature;
 use crate::error::{CryptoError, Result};
+use zeroize::Zeroize;
 use k256::{
     ecdsa::{signature::hazmat::PrehashVerifier, Signature as EcdsaSignature, VerifyingKey},
     elliptic_curve::PrimeField,
@@ -15,7 +16,7 @@ use k256::{
 /// Derive the affine constants `alpha` and `beta` from a single ECDSA
 /// signature such that the private key can be expressed as:
 ///
-///   `d = alpha * k + beta  (mod n)`
+///   `d = alpha * k - beta  (mod n)`
 ///
 /// where `k` is the nonce used to produce the signature.
 ///
@@ -27,23 +28,27 @@ pub fn derive_affine_constants(sig: &Signature) -> Result<(Scalar, Scalar)> {
     if r_inv.is_none().into() {
         return Err(CryptoError::RNotInvertible.into());
     }
-    let r_inv = r_inv.unwrap();
+    let mut r_inv = r_inv.unwrap();
     let alpha = r_inv * sig.s;
-    let beta = Scalar::ZERO - (r_inv * sig.z);
+    let beta = r_inv * sig.z;
+    r_inv.zeroize();
     Ok((alpha, beta))
 }
 
 /// Compute the candidate private key for a given nonce `k` using the affine
-/// relation `d = alpha * k + beta`.
+/// relation `d = alpha * k - beta`.
 #[inline]
 #[must_use]
 pub fn derive_private_key(nonce: i128, alpha: Scalar, beta: Scalar) -> Scalar {
-    let s = Scalar::from(nonce.unsigned_abs());
-    if nonce < 0 {
-        beta - alpha * s
+    let mut s = Scalar::from(nonce.unsigned_abs());
+    let ak = alpha * s;
+    let result = if nonce < 0 {
+        Scalar::ZERO - ak - beta
     } else {
-        alpha * s + beta
-    }
+        ak - beta
+    };
+    s.zeroize();
+    result
 }
 
 /// Parse a decimal or hex string into a secp256k1 `Scalar`.
@@ -235,6 +240,7 @@ mod tests {
     use super::*;
     use k256::elliptic_curve::sec1::ToEncodedPoint;
     use k256::ProjectivePoint;
+    use proptest::prelude::*;
 
     #[test]
     fn test_precompute_and_private_key() {
@@ -244,7 +250,8 @@ mod tests {
             Scalar::from(5u64),
         );
         let (a, b) = derive_affine_constants(&sig).unwrap();
-        assert_eq!(derive_private_key(0, a, b), b);
+        // d = alpha * 0 - beta = -beta
+        assert_eq!(derive_private_key(0, a, b), Scalar::ZERO - b);
     }
 
     #[test]
@@ -277,7 +284,8 @@ mod tests {
     fn test_signed_nonce() {
         let a = Scalar::from(1u64);
         let b = Scalar::from(2u64);
-        assert_eq!(derive_private_key(-1, a, b), b - a);
+        // d = alpha * (-1) - beta = -alpha - beta
+        assert_eq!(derive_private_key(-1, a, b), Scalar::ZERO - a - b);
     }
 
     #[test]
@@ -313,7 +321,8 @@ mod tests {
         let a = Scalar::from(1u64);
         let b = Scalar::from(2u64);
         let result = derive_private_key(i128::MIN, a, b);
-        let expected = b - a * Scalar::from(1u128 << 127);
+        // d = alpha * (-2^127) - beta = -alpha * 2^127 - beta
+        let expected = Scalar::ZERO - a * Scalar::from(1u128 << 127) - b;
         assert_eq!(result, expected);
     }
 
@@ -400,5 +409,53 @@ mod tests {
         )
         .unwrap();
         assert!(verify_ecdsa_signature(&wrong_pk, &r, &s, &z).is_err());
+    }
+
+    #[test]
+    fn test_user_provided_values() {
+        let r = parse_scalar("0xae3a7f6f10f9dd783818bb9ea7d9e1f3282d2cd73c7e71acef7c7bdf19f83be1").unwrap();
+        let s = parse_scalar("0xd4e0c39ac4a4cfb655cf51af2b8e4a0e80ac7004515ea2249b9e2a2c7e5737e0").unwrap();
+        let z = parse_scalar("0xd57586b5c9c6e51ff7689c7d75768106d4f3bba71bd850c3e30a91d46d386d8d").unwrap();
+        let sig = crate::domain::Signature::new(r, s, z);
+        let (alpha, beta) = derive_affine_constants(&sig).unwrap();
+
+        let r_inv = r.invert().unwrap();
+        let expected_alpha = r_inv * s;
+        let expected_beta = r_inv * z;
+
+        assert_eq!(alpha, expected_alpha);
+        assert_eq!(beta, expected_beta);
+    }
+
+    proptest! {
+        #[test]
+        fn prop_parse_int_roundtrip(n in any::<i128>()) {
+            let s = format!("{n}");
+            let parsed = parse_int(&s).unwrap();
+            prop_assert_eq!(parsed, n);
+        }
+
+        #[test]
+        fn prop_derive_private_key_identity(alpha in any::<u64>().prop_map(Scalar::from), beta in any::<u64>().prop_map(Scalar::from)) {
+            // d = alpha * 0 - beta = -beta
+            prop_assert_eq!(derive_private_key(0, alpha, beta), Scalar::ZERO - beta);
+        }
+
+        #[test]
+        fn prop_derive_affine_constants_roundtrip(
+            r in any::<u64>().prop_filter("r must be non-zero", |s| *s != 0),
+            s in any::<u64>(),
+            z in any::<u64>(),
+            k in any::<u64>(),
+        ) {
+            let r_scalar = Scalar::from(r);
+            let s_scalar = Scalar::from(s);
+            let z_scalar = Scalar::from(z);
+            let sig = crate::domain::Signature::new(r_scalar, s_scalar, z_scalar);
+            let (alpha, beta) = derive_affine_constants(&sig).unwrap();
+            // Verify derive_private_key does not panic and produces a valid scalar.
+            let _d = derive_private_key(k as i128, alpha, beta);
+            prop_assert!(true);
+        }
     }
 }

@@ -89,6 +89,7 @@ fn main() {
             .map(|n| n.get())
             .unwrap_or(4),
         log_dir: std::env::temp_dir(),
+        checkpoint_dir: std::env::temp_dir().join("checkpoints"),
         version: "bench",
     };
     let ctx = AppContext::new(config);

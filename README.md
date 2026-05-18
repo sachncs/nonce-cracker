@@ -20,7 +20,7 @@ the private key can be rewritten as:
 d = alpha * k + beta  (mod n)
 ```
 
-where `alpha = r^-1 * s` and `beta = -r^-1 * z`. The tool precomputes these affine constants, then searches for the nonce `k` using a highly optimized parallel scan (for ranges up to 2^32 candidates), a parallel Baby-Step Giant-Step (BSGS) algorithm (for medium ranges up to 2^48 candidates), or Pollard's kangaroo (for massive ranges up to 2^64 candidates).
+where `alpha = r^-1 * s` and `beta = r^-1 * z`. The tool precomputes these affine constants, then searches for the nonce `k` using a highly optimized parallel scan (for ranges up to 2^32 candidates), a parallel Baby-Step Giant-Step (BSGS) algorithm (for medium ranges up to 2^48 candidates), or Pollard's kangaroo (for massive ranges up to 2^64 candidates).
 
 ## Architecture
 
@@ -29,6 +29,7 @@ The repository is organized around a single binary crate with a streamlined, pro
 - `src/main.rs` - CLI parsing, signature validation, affine-constant derivation, hybrid search orchestration (parallel scan + BSGS + kangaroo), and graceful shutdown handling.
 - `src/logging.rs` - Structured logging backend using `tracing` with compact output format.
 - `src/config.rs` - Centralized configuration management with environment variable support.
+- `src/checkpoint.rs` - Minimal checkpoint/resume scaffolding for long searches.
 - `src/metrics.rs` - Search performance metrics collection.
 - `tests/integration.rs` - End-to-end CLI tests including logging behavior and signed-range handling.
 - `benches/search.rs` - Criterion benchmarks for core cryptographic operations.
@@ -36,6 +37,8 @@ The repository is organized around a single binary crate with a streamlined, pro
 - `examples/generate.rs` - Test data generator.
 - `examples/bench_bsgs.rs` - End-to-end BSGS performance benchmark for large ranges (2^32 to 2^52).
 - `docs/` - Architecture documentation and deployment guides.
+- `fuzz/` - `cargo-fuzz` harnesses for parsing and OpenMap.
+- `patches/k256/` - Local fork of `k256` v0.13 with `projective_x` / `projective_z` accessors for the kangaroo hot-path optimization.
 
 Data flow is intentionally linear:
 
@@ -45,10 +48,10 @@ Data flow is intentionally linear:
 4. The search dispatches to the optimal algorithm based on range size:
    - `N <= 2^32`: Parallel scan with batched point comparison
    - `2^32 < N <= 2^48`: Parallel BSGS with batched normalization and OpenMap baby-step table
-   - `N > 2^48`: Pollard's kangaroo (lambda) with O(sqrt(N)) time and O(1) memory
+   - `N > 2^48`: Pollard's kangaroo (lambda) with O(sqrt(N)) time and O(sqrt(N) / 2^d) memory
 5. Each worker evaluates candidate nonce values, compares the resulting public key against the target, and stops on the first match.
 6. Recent optimizations include lock-free scan coordination, per-chunk scalar-mult elimination, and tuned BSGS batch normalization (8192 points/batch).
-6. Matching results are written to the report file and summarized through the centralized logger.
+7. Matching results are written to the report file and summarized through the centralized logger.
 
 This architecture minimizes shared mutable state, keeps the cryptographic math isolated from logging concerns, and makes the CLI/test/benchmark surfaces align with the same search contract.
 
@@ -58,14 +61,16 @@ This architecture minimizes shared mutable state, keeps the cryptographic math i
 
 - **Hybrid search algorithm**: Parallel scan for small ranges (N <= 2^32), parallel BSGS for medium ranges (2^32 < N <= 2^48), Pollard's kangaroo for massive ranges (N > 2^48)
 - **Parallel search** across CPU cores via Rayon (work-stealing scheduler)
-- **Pollard's kangaroo** for massive ranges (> 2^48 candidates) with O(sqrt(N)) time and O(1) memory
+- **Pollard's kangaroo** for massive ranges (> 2^48 candidates) with O(sqrt(N)) time and O(sqrt(N) / 2^d) memory; projective-coordinate hashing eliminates per-step field inversions
 - **OpenMap** custom hash map reducing BSGS memory by ~25%
 - **Native secp256k1 arithmetic** using `k256` crate (no BigInt overhead)
-- **Fast point comparison** using projective coordinates (no field inversion in hot loop)
+- **Fast point comparison** using projective coordinates (no field inversion in any hot loop)
 - **Configurable search range** with decimal or hex notation, including negative bounds
 - **Single CLI interface**: `run` command with ECDSA signature values
 - **Thread count control** with automatic CPU detection fallback
-- **Graceful shutdown** handling for SIGINT/SIGTERM signals
+- **Graceful shutdown** handling for SIGINT/SIGTERM signals (cross-platform via `ctrlc`)
+- **Sensitive-value zeroization** of scalars via `Zeroize` + `Drop` on `SearchOutcome` and temporary intermediates
+- **Checkpoint/resume scaffolding**: writes a plaintext checkpoint before search and removes it on completion
 
 ### Production Features
 
@@ -105,6 +110,13 @@ cargo build --release
 make build    # Release build
 make test     # Run tests
 make clippy   # Run lints
+```
+
+### Quick Setup
+
+```bash
+./setup.sh    # Verify toolchain, create dirs, build release binary
+./cleanup.sh  # Remove build artifacts, logs, checkpoints, temp files
 ```
 
 ## Quick Start
@@ -178,6 +190,7 @@ Application logs are written to a dedicated directory:
 - `NONCE_CRACKER_LOG_DIR` - Directory for application logs and search reports. Default: `logs/`
 - `NONCE_CRACKER_LOG_LEVEL` - Log level for the backend logger (`error`, `warn`, `info`, `debug`, `trace`). Default: `info`
 - `NONCE_CRACKER_LOG_CONSOLE` - Enable console output (`1`/`true` to enable). Default: `true`
+- `NONCE_CRACKER_CHECKPOINT_DIR` - Directory where checkpoint files are written before each search. Default: `checkpoints/`
 
 Relative `--outfile` values are resolved inside the configured log directory. Absolute paths are still accepted for explicit overrides.
 
@@ -227,6 +240,10 @@ nonce-cracker/
 │   └── integration.rs   # End-to-end CLI tests
 ├── benches/
 │   └── search.rs        # Criterion benchmarks
+├── fuzz/
+│   └── fuzz_targets/    # cargo-fuzz / libfuzzer harnesses
+├── patches/
+│   └── k256/            # Local k256 fork with projective accessor patch
 ├── examples/
 │   ├── demo.rs          # Usage demonstration
 │   ├── generate.rs      # Test data generator
@@ -237,12 +254,15 @@ nonce-cracker/
 ├── Cargo.toml
 ├── rust-toolchain.toml
 ├── Makefile
+├── setup.sh
+├── cleanup.sh
 └── README.md
 ```
 
 ### Module overview
 
 - **CLI** (`main.rs`, `cli.rs`): Command-line argument parsing via `clap`, search orchestration
+- **Checkpoint** (`checkpoint.rs`): Plain-text checkpoint serialization and file management
 - **Crypto** (`crypto.rs`): `derive_affine_constants`, `derive_private_key`, scalar and point math
 - **Search** (`src/search/`):
   - `mod.rs` — `SearchEngine` with three-tier dispatch (scan / BSGS / kangaroo)
@@ -274,16 +294,16 @@ Rearranging for `d`:
 
 ```
 d = r^-1 * s * k - r^-1 * z  (mod n)
-d = alpha * k + beta          (mod n)
+d = alpha * k - beta          (mod n)
 ```
 
-where `alpha = r^-1 * s` and `beta = -r^-1 * z`.
+where `alpha = r^-1 * s` and `beta = r^-1 * z`.
 
 Given the public key `Q = d * G`:
 
 ```
-Q = (alpha * k + beta) * G
-Q - beta * G = alpha * k * G
+Q = (alpha * k - beta) * G
+Q + beta * G = alpha * k * G
 ```
 
 The tool searches for `k` in `[start, end]` such that `k * (alpha * G) = Q - beta * G`.
@@ -297,7 +317,7 @@ The tool:
 4. Dispatches to the optimal search algorithm based on `N`:
    - **Parallel scan** (`N <= 2^32`): Partitions the range across worker threads. Each thread evaluates candidates in batches of 1024, using projective point addition and equality comparison (no field inversion in the hot loop).
    - **Parallel BSGS** (`2^32 < N <= 2^48`): Computes `m = ceil(sqrt(N))` baby steps in parallel, storing them in an OpenMap keyed by compressed public key bytes. Giant steps are then evaluated in parallel with batched projective-to-affine normalization (amortized inversion cost).
-   - **Pollard's kangaroo** (`N > 2^48`): Runs a parallel distinguished-point random walk with expected O(sqrt(N)) group operations and O(1) memory.
+   - **Pollard's kangaroo** (`N > 2^48`): Runs a parallel distinguished-point random walk with expected O(sqrt(N)) group operations and O(sqrt(N) / 2^d) memory.
 5. Stops on the first match, writes the report file, and emits a structured summary line.
 
 ### Invariants and failure modes
@@ -306,7 +326,7 @@ The tool:
 - `end` must be greater than or equal to `start`.
 - If `r` is not invertible modulo the curve order, the affine system does not admit a unique solution and the search returns an error.
 - Empty report paths are rejected before file creation.
-- BSGS requires `m <= 2^27` (~134 million baby steps, ~10 GB memory with OpenMap). If the range would exceed this, the search returns an error.
+- BSGS requires `m <= 2^27` (~134 million baby steps, ~10 GB memory with OpenMap). If the expected memory exceeds the 8 GB guard, the engine automatically falls back to Pollard's kangaroo.
 
 ### Complexity
 
@@ -318,7 +338,7 @@ The tool:
 **Parallel BSGS (2^32 < N <= 2^48):**
 - **Time:** O(sqrt(N)) point operations in the worst case.
 - **Space:** O(sqrt(N)) for the baby-step hash map (~10 GB max at N = 2^52 with OpenMap).
-- **Parallelism:** Both baby steps and giant steps are computed in parallel. Baby-step tables are merged sequentially after parallel construction.
+- **Parallelism:** Both baby steps and giant steps are computed in parallel. Baby-step tables are kept sharded; giant-step lookups scan all shards, eliminating the 2× memory peak from sequential merging.
 
 **Pollard's Kangaroo (N > 2^48):**
 - **Time:** O(sqrt(N)) group operations in expectation.
@@ -334,7 +354,7 @@ Measured on Apple M4 (12 cores):
 | 2^32 | Parallel scan | ~14 ms | ~10 MB |
 | 2^48 | BSGS | ~3.1 s | ~1.3 GB |
 | 2^52 | BSGS | ~112 s | ~10 GB |
-| 2^56 | Kangaroo | ~180 s | ~50 MB |
+| 2^56 | Kangaroo | ~2–5 s | ~50 MB |
 
 - **Per thread (scan)**: ~5-10 million keys/second (varies by hardware)
 - **Per thread (BSGS giant steps)**: ~1-2 million batch-normalized points/second
@@ -342,6 +362,7 @@ Measured on Apple M4 (12 cores):
 - **Memory (scan)**: ~10 MB base, ~1 MB per additional thread
 - **Memory (BSGS)**: ~10 GB max for the largest supported ranges
 - **Logging overhead**: Bounded by line-buffered file writes; report-file writes are single-pass
+- **Kangaroo hot-path speedup**: The projective-coordinate hash optimization (using a patched `k256` fork to expose `X` and `Z` coordinates) eliminates two field inversions per iteration, reducing the 2^56 wall time from ~180 s to ~2–5 s.
 
 ## Exit Codes
 
@@ -391,6 +412,22 @@ cargo bench
 # Run end-to-end BSGS benchmark for a specific range size
 cargo run --example bench_bsgs --release -- 48
 ```
+
+## Fuzzing
+
+```bash
+# Install cargo-fuzz
+cargo install cargo-fuzz
+
+# Run a fuzz target (e.g., parse_scalar)
+cargo fuzz run parse_scalar -- -max_total_time=60
+```
+
+Targets:
+- `parse_scalar`: Hex/decimal string parsing
+- `parse_pubkey`: Public key SEC1 decoding
+- `parse_int`: Signed integer parsing
+- `openmap`: Insert/lookup round-trips
 
 Benchmarks cover:
 - `scalar_invert`: Scalar modular inversion
