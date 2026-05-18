@@ -17,7 +17,7 @@ s = k^-1(z + r * d)  (mod n)
 the private key can be rewritten as:
 
 ```
-d = alpha * k + beta  (mod n)
+d = alpha * k - beta  (mod n)
 ```
 
 where `alpha = r^-1 * s` and `beta = r^-1 * z`. The tool precomputes these affine constants, then searches for the nonce `k` using a highly optimized parallel scan (for ranges up to 2^32 candidates), a parallel Baby-Step Giant-Step (BSGS) algorithm (for medium ranges up to 2^48 candidates), or Pollard's kangaroo (for massive ranges up to 2^64 candidates).
