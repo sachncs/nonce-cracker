@@ -5,7 +5,7 @@
 
 use crate::{
     context::ShutdownToken,
-    crypto::affine_key,
+    crypto::affine_key_prefix,
     error::{EngineError, Result},
     search::openmap::OpenMap,
     search::params::{GiantStepParams, ScanParams},
@@ -17,11 +17,12 @@ use std::sync::Arc;
 
 /// Maximum baby-step table size (in entries) to prevent unbounded memory use.
 ///
-/// At `2^27` entries the OpenMap consumes roughly 10 GB.
-pub const BSGS_MAX_M: u64 = 1 << 27;
-/// Compressed encoding of the identity point, used as a sentinel key.
+/// At `2^28` entries the compact OpenMap consumes roughly 6 GB.
+pub const BSGS_MAX_M: u64 = 1 << 28;
+/// 128-bit prefix of the identity point encoding, used as a sentinel key.
 ///
-/// On secp256k1 (prime order), the identity point encodes as `0x02` + 32 zero bytes.
+/// On secp256k1 (prime order), the identity point encodes as `0x02` + 32 zero
+/// bytes.  The first 16 bytes are `0x02` followed by 15 zero bytes.
 ///
 /// # Safety invariant
 ///
@@ -29,13 +30,11 @@ pub const BSGS_MAX_M: u64 = 1 << 27;
 /// identity point has a unique compressed encoding.  On a curve with a cofactor
 /// the identity could have multiple representations and this assumption would
 /// break.
-const IDENTITY_KEY: [u8; 33] = {
-    let mut k = [0u8; 33];
-    k[0] = 0x02;
-    k
-};
+const IDENTITY_KEY: u128 = 0x02000000000000000000000000000000u128;
 /// Number of giant-step points processed in one batch-normalize call.
 const BATCH: u64 = 8192;
+/// Approximate size of one compact OpenMap entry in bytes (key + value + state + padding).
+const OPENMAP_ENTRY_BYTES: u64 = 24;
 
 /// Run the Baby-Step Giant-Step search over the given [`ScanParams`].
 ///
@@ -48,7 +47,7 @@ pub fn search(
     shutdown: &ShutdownToken,
     scan: &ScanParams,
 ) -> Result<Option<i128>> {
-    debug_assert_eq!(affine_key(&AffinePoint::IDENTITY), IDENTITY_KEY,
+    debug_assert_eq!(affine_key_prefix(&AffinePoint::IDENTITY), IDENTITY_KEY,
         "IDENTITY_KEY sentinel must match AffinePoint::IDENTITY encoding");
 
     let target_affine: AffinePoint = *scan.target.as_affine();
@@ -77,11 +76,11 @@ pub fn search(
     let m_u64 = u64::try_from(m).map_err(|_| EngineError::BsgsMOverflow)?;
 
     // Expected peak memory: per-thread OpenMaps at 0.7 load factor.
-    // Entry size is 64 bytes.  Cap at ~8 GB to prevent OOM on typical machines.
+    // Entry size is ~24 bytes.  Cap at ~8 GB to prevent OOM on typical machines.
     const BSGS_MEMORY_LIMIT_BYTES: u64 = 8 * 1024 * 1024 * 1024;
     let per_thread_cap = ((m_u64 as f64 / thread_count as f64 / 0.7).ceil() as u64)
         .next_power_of_two();
-    let expected_bytes = thread_count as u64 * per_thread_cap * 64;
+    let expected_bytes = thread_count as u64 * per_thread_cap * OPENMAP_ENTRY_BYTES;
     if expected_bytes > BSGS_MEMORY_LIMIT_BYTES {
         return Err(EngineError::BsgsMemoryLimit.into());
     }
@@ -144,8 +143,8 @@ fn run_giant_steps(p: &GiantStepParams<'_>) -> Option<u64> {
                 let mut current = giant;
                 for idx in 0..(batch_end - i) {
                     if current == ProjectivePoint::IDENTITY {
-                        if let Some(j) = lookup_in_shards(p.baby_maps, &IDENTITY_KEY) {
-                            let k = (u128::from(i) + u128::from(idx)) * u128::from(p.m) + j;
+                        if let Some(j) = lookup_in_shards(p.baby_maps, IDENTITY_KEY) {
+                            let k = (u128::from(i) + u128::from(idx)) * u128::from(p.m) + u128::from(j);
                             if k < p.total {
                                 let _ = result.compare_exchange(
                                     u64::MAX,
@@ -170,9 +169,9 @@ fn run_giant_steps(p: &GiantStepParams<'_>) -> Option<u64> {
                         ProjectivePoint::batch_normalize(points.as_slice());
                     for (affine_idx, affine) in affines.iter().enumerate() {
                         let idx = indices[affine_idx];
-                        let key = affine_key(affine);
-                        if let Some(j) = lookup_in_shards(p.baby_maps, &key) {
-                            let k = (u128::from(i) + u128::from(idx)) * u128::from(p.m) + j;
+                        let key = affine_key_prefix(affine);
+                        if let Some(j) = lookup_in_shards(p.baby_maps, key) {
+                            let k = (u128::from(i) + u128::from(idx)) * u128::from(p.m) + u128::from(j);
                             if k < p.total {
                                 let _ = result.compare_exchange(
                                     u64::MAX,
@@ -207,10 +206,10 @@ fn reconstruct_nonce(p: &GiantStepParams<'_>, k_giant: u64) -> Option<i128> {
     let key = if point == ProjectivePoint::IDENTITY {
         IDENTITY_KEY
     } else {
-        affine_key(&point.to_affine())
+        affine_key_prefix(&point.to_affine())
     };
-    if let Some(j) = lookup_in_shards(p.baby_maps, &key) {
-        let candidate = km + j;
+    if let Some(j) = lookup_in_shards(p.baby_maps, key) {
+        let candidate = km + u128::from(j);
         if candidate < p.total {
             let Ok(candidate_i128) = i128::try_from(candidate) else {
                 tracing::warn!("BSGS candidate exceeds i128 range; skipping valid match");
@@ -224,7 +223,7 @@ fn reconstruct_nonce(p: &GiantStepParams<'_>, k_giant: u64) -> Option<i128> {
 
 /// Look up a key across all sharded baby-step tables.
 #[inline]
-fn lookup_in_shards(baby_maps: &[OpenMap], key: &[u8; 33]) -> Option<u128> {
+fn lookup_in_shards(baby_maps: &[OpenMap], key: u128) -> Option<u64> {
     for map in baby_maps {
         if let Some(&value) = map.get(key) {
             return Some(value);
@@ -280,8 +279,9 @@ fn build_baby_steps(
                 let affines: Vec<AffinePoint> = ProjectivePoint::batch_normalize(points.as_slice());
 
                 for (idx, affine) in affines.iter().enumerate() {
-                    let key = affine_key(affine);
-                    let inserted = j + u128::try_from(idx).expect("idx fits in u128");
+                    let key = affine_key_prefix(affine);
+                    let inserted = u64::try_from(j + u128::try_from(idx).expect("idx fits in u128"))
+                        .expect("inserted fits in u64");
                     map.insert(key, inserted);
                 }
 
@@ -302,6 +302,6 @@ mod tests {
     fn identity_key_matches_affine_identity() {
         // Verify the sentinel key matches k256's actual identity encoding.
         // This assumption relies on secp256k1 being prime-order.
-        assert_eq!(affine_key(&AffinePoint::IDENTITY), IDENTITY_KEY);
+        assert_eq!(affine_key_prefix(&AffinePoint::IDENTITY), IDENTITY_KEY);
     }
 }

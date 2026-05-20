@@ -36,7 +36,7 @@ pub const BSGS_THRESHOLD: u128 = 1 << 32;
 
 /// Maximum candidate count for which BSGS is used.
 /// Above this threshold Pollard's kangaroo is selected automatically.
-pub const KANGAROO_THRESHOLD: u128 = 1 << 48;
+pub const KANGAROO_THRESHOLD: u128 = 1 << 52;
 
 /// Owned search engine that holds a reusable Rayon thread pool.
 ///
@@ -205,6 +205,13 @@ impl SearchEngine {
                 Ok(result) => result,
                 Err(crate::error::Error::Engine(crate::error::EngineError::BsgsMemoryLimit)) => {
                     tracing::warn!("BSGS memory limit exceeded; falling back to kangaroo");
+                    // Auto-tune distinguished-point density:
+                    // target ~1000 total DPs to balance memory and collision probability.
+                    let d = ((self.thread_count as f64).log2()
+                        + (total as f64).sqrt().log2()
+                        - 10.0)
+                        .round()
+                        .clamp(8.0, 24.0) as u32;
                     let kangaroo_params = crate::search::params::KangarooParams::new(
                         ProjectivePoint::GENERATOR,
                         scan.target.into(),
@@ -213,7 +220,7 @@ impl SearchEngine {
                         scan.start,
                         scan.step,
                         total,
-                        16,
+                        d,
                         None,
                     )?;
                     kangaroo::search(

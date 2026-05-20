@@ -20,7 +20,7 @@ the private key can be rewritten as:
 d = alpha * k - beta  (mod n)
 ```
 
-where `alpha = r^-1 * s` and `beta = r^-1 * z`. The tool precomputes these affine constants, then searches for the nonce `k` using a highly optimized parallel scan (for ranges up to 2^32 candidates), a parallel Baby-Step Giant-Step (BSGS) algorithm (for medium ranges up to 2^48 candidates), or Pollard's kangaroo (for massive ranges up to 2^64 candidates).
+where `alpha = r^-1 * s` and `beta = r^-1 * z`. The tool precomputes these affine constants, then searches for the nonce `k` using a highly optimized parallel scan (for ranges up to 2^32 candidates), a parallel Baby-Step Giant-Step (BSGS) algorithm (for medium ranges up to 2^52 candidates), or Pollard's kangaroo (for massive ranges up to 2^64 candidates).
 
 ## Architecture
 
@@ -47,8 +47,8 @@ Data flow is intentionally linear:
 3. `derive_affine_constants` produces the affine parameters `alpha` and `beta`.
 4. The search dispatches to the optimal algorithm based on range size:
    - `N <= 2^32`: Parallel scan with batched point comparison
-   - `2^32 < N <= 2^48`: Parallel BSGS with batched normalization and OpenMap baby-step table
-   - `N > 2^48`: Pollard's kangaroo (lambda) with O(sqrt(N)) time and O(sqrt(N) / 2^d) memory
+   - `2^32 < N <= 2^52`: Parallel BSGS with batched normalization and compact OpenMap baby-step table
+   - `N > 2^52`: Pollard's kangaroo (lambda) with O(sqrt(N)) time and O(sqrt(N) / 2^d) memory
 5. Each worker evaluates candidate nonce values, compares the resulting public key against the target, and stops on the first match.
 6. Recent optimizations include lock-free scan coordination, per-chunk scalar-mult elimination, and tuned BSGS batch normalization (8192 points/batch).
 7. Matching results are written to the report file and summarized through the centralized logger.
@@ -59,9 +59,9 @@ This architecture minimizes shared mutable state, keeps the cryptographic math i
 
 ### Core Functionality
 
-- **Hybrid search algorithm**: Parallel scan for small ranges (N <= 2^32), parallel BSGS for medium ranges (2^32 < N <= 2^48), Pollard's kangaroo for massive ranges (N > 2^48)
+- **Hybrid search algorithm**: Parallel scan for small ranges (N <= 2^32), parallel BSGS for medium ranges (2^32 < N <= 2^52), Pollard's kangaroo for massive ranges (N > 2^52)
 - **Parallel search** across CPU cores via Rayon (work-stealing scheduler)
-- **Pollard's kangaroo** for massive ranges (> 2^48 candidates) with O(sqrt(N)) time and O(sqrt(N) / 2^d) memory; projective-coordinate hashing eliminates per-step field inversions
+- **Pollard's kangaroo** for massive ranges (> 2^52 candidates) with O(sqrt(N)) time and O(sqrt(N) / 2^d) memory; projective-coordinate hashing eliminates per-step field inversions; auto-tuned `d` parameter balances memory and collision probability
 - **OpenMap** custom hash map reducing BSGS memory by ~25%
 - **Native secp256k1 arithmetic** using `k256` crate (no BigInt overhead)
 - **Fast point comparison** using projective coordinates (no field inversion in any hot loop)
@@ -268,7 +268,7 @@ nonce-cracker/
   - `mod.rs` — `SearchEngine` with three-tier dispatch (scan / BSGS / kangaroo)
   - `parallel.rs` — Parallel brute-force scan for ranges ≤ 2^32
   - `bsgs.rs` — Baby-Step Giant-Step with batched normalization and `OpenMap`
-  - `kangaroo.rs` — Pollard's kangaroo (lambda) for bounded-range search > 2^48
+  - `kangaroo.rs` — Pollard's kangaroo (lambda) for bounded-range search > 2^52
   - `openmap.rs` — Open-addressing hash map replacing `FxHashMap`, ~25% memory savings
   - `params.rs` — `ScanParams`, `GiantStepParams`, `KangarooParams`
 
@@ -306,7 +306,7 @@ Q = (alpha * k - beta) * G
 Q + beta * G = alpha * k * G
 ```
 
-The tool searches for `k` in `[start, end]` such that `k * (alpha * G) = Q - beta * G`.
+The tool searches for `k` in `[start, end]` such that `k * (alpha * G) = Q + beta * G`.
 
 ### Search algorithm
 
@@ -316,8 +316,8 @@ The tool:
 3. Computes the total number of candidates `N = floor((end - start) / step) + 1`.
 4. Dispatches to the optimal search algorithm based on `N`:
    - **Parallel scan** (`N <= 2^32`): Partitions the range across worker threads. Each thread evaluates candidates in batches of 1024, using projective point addition and equality comparison (no field inversion in the hot loop).
-   - **Parallel BSGS** (`2^32 < N <= 2^48`): Computes `m = ceil(sqrt(N))` baby steps in parallel, storing them in an OpenMap keyed by compressed public key bytes. Giant steps are then evaluated in parallel with batched projective-to-affine normalization (amortized inversion cost).
-   - **Pollard's kangaroo** (`N > 2^48`): Runs a parallel distinguished-point random walk with expected O(sqrt(N)) group operations and O(sqrt(N) / 2^d) memory.
+   - **Parallel BSGS** (`2^32 < N <= 2^52`): Computes `m = ceil(sqrt(N))` baby steps in parallel, storing them in a compact OpenMap keyed by 128-bit point prefixes. Giant steps are then evaluated in parallel with batched projective-to-affine normalization (amortized inversion cost).
+   - **Pollard's kangaroo** (`N > 2^52`): Runs a parallel distinguished-point random walk with expected O(sqrt(N)) group operations and O(sqrt(N) / 2^d) memory.
 5. Stops on the first match, writes the report file, and emits a structured summary line.
 
 ### Invariants and failure modes
@@ -335,12 +335,12 @@ The tool:
 - **Space:** O(1) worker-local state, plus the report file and bounded coordination state.
 - **Parallelism:** Work is distributed across a dedicated Rayon pool, so wall-clock time scales with the number of useful CPU cores.
 
-**Parallel BSGS (2^32 < N <= 2^48):**
+**Parallel BSGS (2^32 < N <= 2^52):**
 - **Time:** O(sqrt(N)) point operations in the worst case.
-- **Space:** O(sqrt(N)) for the baby-step hash map (~10 GB max at N = 2^52 with OpenMap).
+- **Space:** O(sqrt(N)) for the baby-step hash map (~3 GB max at N = 2^52 with compact OpenMap).
 - **Parallelism:** Both baby steps and giant steps are computed in parallel. Baby-step tables are kept sharded; giant-step lookups scan all shards, eliminating the 2× memory peak from sequential merging.
 
-**Pollard's Kangaroo (N > 2^48):**
+**Pollard's Kangaroo (N > 2^52):**
 - **Time:** O(sqrt(N)) group operations in expectation.
 - **Space:** O(sqrt(N) / 2^d) for distinguished points (~50 MB at N = 2^56 with d=16).
 - **Parallelism:** Near-linear scaling with thread count.
@@ -352,15 +352,15 @@ Measured on Apple M4 (12 cores):
 | Range size | Algorithm | Wall time | Memory |
 |------------|-----------|-----------|--------|
 | 2^32 | Parallel scan | ~14 ms | ~10 MB |
-| 2^48 | BSGS | ~3.1 s | ~1.3 GB |
-| 2^52 | BSGS | ~112 s | ~10 GB |
-| 2^56 | Kangaroo | ~2–5 s | ~50 MB |
+| 2^48 | BSGS | ~3.1 s | ~0.5 GB |
+| 2^52 | BSGS | ~112 s | ~3 GB |
+| 2^56 | Kangaroo | ~2–5 s | ~10–50 MB |
 
 - **Per thread (scan)**: ~5-10 million keys/second (varies by hardware)
 - **Per thread (BSGS giant steps)**: ~1-2 million batch-normalized points/second
 - **Scaling**: Near-linear with CPU core count for sufficiently large search windows
 - **Memory (scan)**: ~10 MB base, ~1 MB per additional thread
-- **Memory (BSGS)**: ~10 GB max for the largest supported ranges
+- **Memory (BSGS)**: ~3 GB max for the largest supported ranges (compact 128-bit keys)
 - **Logging overhead**: Bounded by line-buffered file writes; report-file writes are single-pass
 - **Kangaroo hot-path speedup**: The projective-coordinate hash optimization (using a patched `k256` fork to expose `X` and `Z` coordinates) eliminates two field inversions per iteration, reducing the 2^56 wall time from ~180 s to ~2–5 s.
 
@@ -382,7 +382,7 @@ The tool returns descriptive errors for common failure modes:
 | `number parse error` | Invalid number format | Use decimal or `0x` prefix |
 | `end must be >= start` | Invalid range | Set valid range |
 | `r not invertible` | No modular inverse for `r` | Signature values may be invalid |
-| `BSGS memory limit exceeded` | Range too large for BSGS | Use kangaroo for ranges > 2^48 |
+| `BSGS memory limit exceeded` | Range too large for BSGS | Use kangaroo for ranges > 2^52 |
 
 ## Testing
 

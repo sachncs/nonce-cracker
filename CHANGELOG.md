@@ -32,6 +32,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `GiantStepParams.baby_map` renamed to `baby_maps` and changed to `&[OpenMap]`.
 - **Pollard's kangaroo no longer converts to affine on every step**: `kangaroo_step` now hashes the projective `(X, Z)` pair via a minimal k256 patch (`projective_x` / `projective_z` accessors) to select the jump size.  Affine conversion only happens when storing or checking a distinguished point.  Eliminates ~2 field inversions per loop iteration (~100× speedup on the hot path).
 - **Affine relation updated to positive-beta formulation**: `beta = r^-1 * z` (positive), `d = alpha * k - beta`.  `derive_affine_constants` and `derive_private_key` updated accordingly.  Documentation (`README.md`, `docs/affine-relation-derivation.md`) aligned.
+- **Compact `OpenMap` keys**: BSGS baby-step table now stores 128-bit key prefixes instead of full 33-byte compressed points, reducing entry size from ~72 bytes to ~24 bytes (~3× memory reduction).  Collision probability is `m² / 2¹²⁹` (negligible); any false positive is caught by cryptographic verification.
+- **Auto-tuned kangaroo `d` parameter**: distinguished-point bit density is now computed as `log2(threads * sqrt(N) / 1000)` and clamped to `[8, 24]`, balancing memory and collision probability per range size instead of using a fixed `d=16`.
 
 ### Fixed
 - `file.try_clone().expect()` panic in logging replaced with `LogWriter` enum and `io::Sink` fallback.

@@ -5,15 +5,19 @@ const EMPTY: u8 = 0;
 const OCCUPIED: u8 = 1;
 
 struct Entry {
-    key: [u8; 33],
-    value: u128,
+    key: u128,
+    value: u64,
     state: u8,
 }
 
-/// Open-addressing hash map with 33-byte keys and u128 values.
+/// Open-addressing hash map with 128-bit keys and 64-bit values.
 ///
-/// Stores compressed elliptic curve points as keys and maps them to step
-/// indices.  Uses quadratic probing and FxHash for fast lookups.
+/// Stores the first 16 bytes of a compressed elliptic curve point as the key
+/// and maps it to a step index.  Collision probability is negligible for the
+/// supported table sizes; any false positive is caught by cryptographic
+/// verification downstream.
+///
+/// Uses quadratic probing and FxHash for fast lookups.
 pub struct OpenMap {
     entries: Vec<Entry>,
     mask: usize,
@@ -31,8 +35,8 @@ impl OpenMap {
         let table_cap = target.next_power_of_two();
         let mut entries = Vec::with_capacity(table_cap);
         entries.resize_with(table_cap, || Entry {
-            key: [0u8; 33],
-            value: 0u128,
+            key: 0,
+            value: 0,
             state: EMPTY,
         });
         Self {
@@ -43,23 +47,23 @@ impl OpenMap {
         }
     }
 
-    fn hash(&self, key: &[u8; 33]) -> usize {
-        (self.hasher.hash_one(key) as usize) & self.mask
+    fn hash(&self, key: u128) -> usize {
+        ((self.hasher.hash_one(key) as usize) ^ (key as usize)) & self.mask
     }
 
     /// Insert a key-value pair into the map.
     ///
     /// If the key already exists, its value is overwritten.
     /// Automatically grows the table when the load factor reaches ~0.7.
-    pub fn insert(&mut self, key: [u8; 33], value: u128) {
+    pub fn insert(&mut self, key: u128, value: u64) {
         if self.entries.is_empty() || self.len * 10 >= self.entries.len() * 7 {
             self.grow();
         }
         self.insert_internal(key, value);
     }
 
-    fn insert_internal(&mut self, key: [u8; 33], value: u128) {
-        let base = self.hash(&key);
+    fn insert_internal(&mut self, key: u128, value: u64) {
+        let base = self.hash(key);
         let mut i = 0usize;
         loop {
             let step = i.wrapping_mul(i + 1) / 2;
@@ -87,8 +91,8 @@ impl OpenMap {
         let new_cap = old_entries.len().max(1).next_power_of_two() * 2;
         let mut new_entries = Vec::with_capacity(new_cap);
         new_entries.resize_with(new_cap, || Entry {
-            key: [0u8; 33],
-            value: 0u128,
+            key: 0,
+            value: 0,
             state: EMPTY,
         });
         self.entries = new_entries;
@@ -102,7 +106,7 @@ impl OpenMap {
     }
 
     /// Look up a key and return a reference to its value, if present.
-    pub fn get(&self, key: &[u8; 33]) -> Option<&u128> {
+    pub fn get(&self, key: u128) -> Option<&u64> {
         let base = self.hash(key);
         let mut i = 0usize;
         loop {
@@ -111,7 +115,7 @@ impl OpenMap {
             let entry = &self.entries[idx];
             match entry.state {
                 EMPTY => return None,
-                OCCUPIED if entry.key == *key => return Some(&entry.value),
+                OCCUPIED if entry.key == key => return Some(&entry.value),
                 _ => {
                     i += 1;
                 }
@@ -136,7 +140,7 @@ impl OpenMap {
 }
 
 impl IntoIterator for OpenMap {
-    type Item = ([u8; 33], u128);
+    type Item = (u128, u64);
     type IntoIter = OpenMapIntoIter;
 
     fn into_iter(self) -> Self::IntoIter {
@@ -154,7 +158,7 @@ pub struct OpenMapIntoIter {
 }
 
 impl Iterator for OpenMapIntoIter {
-    type Item = ([u8; 33], u128);
+    type Item = (u128, u64);
 
     fn next(&mut self) -> Option<Self::Item> {
         while self.index < self.entries.len() {
@@ -176,43 +180,39 @@ mod tests {
     #[test]
     fn basic_insert_and_get() {
         let mut map = OpenMap::with_capacity(16);
-        let key = [0xABu8; 33];
+        let key: u128 = 0xABABABABABABABABABABABABABABABABu128;
         map.insert(key, 42);
-        assert_eq!(map.get(&key), Some(&42));
+        assert_eq!(map.get(key), Some(&42));
         assert_eq!(map.len(), 1);
     }
 
     #[test]
     fn overwrite_existing() {
         let mut map = OpenMap::with_capacity(16);
-        let key = [0xCDu8; 33];
+        let key: u128 = 0xCDCDCDCDCDCDCDCDCDCDCDCDCDCDCDCDu128;
         map.insert(key, 1);
         map.insert(key, 2);
-        assert_eq!(map.get(&key), Some(&2));
+        assert_eq!(map.get(key), Some(&2));
         assert_eq!(map.len(), 1);
     }
 
     #[test]
     fn missing_key() {
         let map = OpenMap::with_capacity(16);
-        let key = [0xEFu8; 33];
-        assert_eq!(map.get(&key), None);
+        let key: u128 = 0xEFEFEFEFEFEFEFEFEFEFEFEFEFEFEFEFu128;
+        assert_eq!(map.get(key), None);
     }
 
     #[test]
     fn many_entries() {
         let mut map = OpenMap::with_capacity(1024);
-        for i in 0..512u128 {
-            let mut key = [0u8; 33];
-            key[0..16].copy_from_slice(&i.to_le_bytes());
-            key[16..32].copy_from_slice(&i.to_le_bytes());
+        for i in 0..512u64 {
+            let key = u128::from(i) | (u128::from(i) << 64);
             map.insert(key, i);
         }
-        for i in 0..512u128 {
-            let mut key = [0u8; 33];
-            key[0..16].copy_from_slice(&i.to_le_bytes());
-            key[16..32].copy_from_slice(&i.to_le_bytes());
-            assert_eq!(map.get(&key), Some(&i));
+        for i in 0..512u64 {
+            let key = u128::from(i) | (u128::from(i) << 64);
+            assert_eq!(map.get(key), Some(&i));
         }
         assert_eq!(map.len(), 512);
     }
@@ -230,43 +230,37 @@ mod tests {
         let mut map = OpenMap::with_capacity(128);
         let n: u64 = 32;
         for i in 0..n {
-            let mut key = [0u8; 33];
-            key[0..8].copy_from_slice(&[0xCA, 0xFE, 0xBA, 0xBE, 0xDE, 0xAD, 0xBE, 0xEF]);
-            key[8..16].copy_from_slice(&i.to_le_bytes());
-            key[16..24].copy_from_slice(&i.to_le_bytes());
-            map.insert(key, i as u128);
+            let key = 0xCAFEBABEDEADBEEF0000000000000000u128 | u128::from(i);
+            map.insert(key, i);
         }
         for i in 0..n {
-            let mut key = [0u8; 33];
-            key[0..8].copy_from_slice(&[0xCA, 0xFE, 0xBA, 0xBE, 0xDE, 0xAD, 0xBE, 0xEF]);
-            key[8..16].copy_from_slice(&i.to_le_bytes());
-            key[16..24].copy_from_slice(&i.to_le_bytes());
-            assert_eq!(map.get(&key), Some(&(i as u128)));
+            let key = 0xCAFEBABEDEADBEEF0000000000000000u128 | u128::from(i);
+            assert_eq!(map.get(key), Some(&i));
         }
         assert_eq!(map.len(), n as usize);
     }
 
     proptest! {
         #[test]
-        fn prop_insert_get_roundtrip(key in any::<[u8; 33]>(), value in any::<u128>()) {
+        fn prop_insert_get_roundtrip(key in any::<u128>(), value in any::<u64>()) {
             let mut map = OpenMap::with_capacity(1024);
             map.insert(key, value);
-            prop_assert_eq!(map.get(&key), Some(&value));
+            prop_assert_eq!(map.get(key), Some(&value));
             prop_assert_eq!(map.len(), 1);
         }
 
         #[test]
-        fn prop_overwrite(key in any::<[u8; 33]>(), v1 in any::<u128>(), v2 in any::<u128>()) {
+        fn prop_overwrite(key in any::<u128>(), v1 in any::<u64>(), v2 in any::<u64>()) {
             let mut map = OpenMap::with_capacity(1024);
             map.insert(key, v1);
             map.insert(key, v2);
-            prop_assert_eq!(map.get(&key), Some(&v2));
+            prop_assert_eq!(map.get(key), Some(&v2));
             prop_assert_eq!(map.len(), 1);
         }
 
         #[test]
         fn prop_many_entries(
-            entries in prop::collection::vec((any::<[u8; 33]>(), any::<u128>()), 1..512)
+            entries in prop::collection::vec((any::<u128>(), any::<u64>()), 1..512)
         ) {
             let mut map = OpenMap::with_capacity(entries.len());
             let mut expected = std::collections::HashMap::new();
@@ -275,7 +269,7 @@ mod tests {
                 expected.insert(*key, *value);
             }
             for (key, value) in &expected {
-                prop_assert_eq!(map.get(key), Some(value));
+                prop_assert_eq!(map.get(*key), Some(value));
             }
             prop_assert_eq!(map.len(), expected.len());
         }

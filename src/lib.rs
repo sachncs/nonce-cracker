@@ -42,8 +42,8 @@ pub use search::SearchEngine;
 
 // Cryptographic utilities
 pub use crypto::{
-    affine_key, derive_affine_constants, derive_private_key, parse_int, parse_pubkey, parse_scalar,
-    scalar_hex, verify_ecdsa_signature,
+    affine_key, affine_key_prefix, derive_affine_constants, derive_private_key, parse_int,
+    parse_pubkey, parse_scalar, scalar_hex, verify_ecdsa_signature,
 };
 
 // Logging utilities are available via `nonce_cracker::logging`.

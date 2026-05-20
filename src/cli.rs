@@ -10,8 +10,8 @@ use k256::elliptic_curve::{sec1::ToEncodedPoint, PrimeField};
 use k256::{ProjectivePoint, PublicKey, Scalar};
 use nonce_cracker::{
     derive_private_key, logging::emit_summary, parse_int, parse_pubkey, parse_scalar, scalar_hex,
-    verify_ecdsa_signature, AppContext, Error, RangeError, Result, SearchEngine, SearchOutcome,
-    SearchSpec, Signature, TracingMetricsSink,
+    verify_ecdsa_signature, AppContext, CryptoError, Error, RangeError, Result, SearchEngine,
+    SearchOutcome, SearchSpec, Signature, TracingMetricsSink,
 };
 use std::{
     fs::File,
@@ -71,6 +71,12 @@ pub struct SearchArgs {
     /// Report file name or path.
     #[arg(long, default_value = "search.log")]
     pub outfile: String,
+    /// Offset to subtract from the private key before searching.
+    ///
+    /// The search uses `d_new = alpha * k` where `d_new = d - offset`.
+    /// When a nonce is found, the recovered private key is `d = alpha * k + offset`.
+    #[arg(long, default_value = "0", allow_hyphen_values = true)]
+    pub offset: String,
 }
 
 /// Available CLI subcommands.
@@ -101,6 +107,26 @@ pub fn run_search(ctx: &AppContext, args: &SearchArgs) -> Result<()> {
     let target = parse_pubkey(&args.pubkey)?;
     verify_ecdsa_signature(&target, &sig.r, &sig.s, &sig.z)?;
 
+    let offset = parse_scalar(&args.offset)?;
+
+    let (search_target, search_sig, d_offset) = if offset == k256::Scalar::ZERO {
+        (target, sig, None)
+    } else {
+        // Offset mode: search for d_new = alpha * k where d_new = d - offset.
+        // Adjust target: Q_new = Q - offset * G.
+        // Use z=0 signature so beta=0 in the search.
+        let offset_point = k256::ProjectivePoint::GENERATOR * offset;
+        let target_affine: k256::AffinePoint = *target.as_affine();
+        let adjusted: k256::AffinePoint =
+            (k256::ProjectivePoint::from(target_affine) - offset_point).to_affine();
+        let adjusted_pk =
+            k256::PublicKey::from_affine(adjusted).map_err(|e| {
+                CryptoError::PubkeyParse(format!("adjusted target public key: {e}"))
+            })?;
+        let search_sig = Signature::new(sig.r, sig.s, k256::Scalar::ZERO);
+        (adjusted_pk, search_sig, Some(offset))
+    };
+
     let spec = SearchSpec::new(
         parse_int(&args.start)?,
         parse_int(&args.end)?,
@@ -121,9 +147,9 @@ pub fn run_search(ctx: &AppContext, args: &SearchArgs) -> Result<()> {
     let tmp = out.with_extension(format!("tmp.{}", std::process::id()));
     let mut log = BufWriter::new(File::create(&tmp)?);
 
-    let outcome = engine.search(&spec, &sig, &target)?;
+    let outcome = engine.search(&spec, &search_sig, &search_target)?;
 
-    write_outcome(&mut log, &outcome, !args.quiet)?;
+    write_outcome(&mut log, &outcome, !args.quiet, d_offset.as_ref())?;
     drop(log);
     std::fs::rename(&tmp, &out)?;
     Ok(())
@@ -173,19 +199,30 @@ pub fn run_example(ctx: &AppContext) -> Result<()> {
 
     let outcome = engine.search(&spec, &sig, &pk)?;
 
-    write_outcome(&mut log, &outcome, true)?;
+    write_outcome(&mut log, &outcome, true, None)?;
     drop(log);
     std::fs::rename(&tmp, &out)?;
     Ok(())
 }
 
 /// Write the search outcome to the log file and optionally the console.
-fn write_outcome(log: &mut BufWriter<File>, outcome: &SearchOutcome, console: bool) -> Result<()> {
+///
+/// If `offset` is provided, it is added to the derived private key before
+/// reporting (offset-search mode).
+fn write_outcome(
+    log: &mut BufWriter<File>,
+    outcome: &SearchOutcome,
+    console: bool,
+    offset: Option<&k256::Scalar>,
+) -> Result<()> {
     writeln!(log, "alpha: 0x{}", scalar_hex(&outcome.alpha))?;
     writeln!(log, "beta:  0x{}", scalar_hex(&outcome.beta))?;
 
     if let Some(nonce) = outcome.nonce {
         let mut d = derive_private_key(nonce, outcome.alpha, outcome.beta);
+        if let Some(off) = offset {
+            d += *off;
+        }
         let hex = scalar_hex(&d);
         writeln!(log, "FOUND nonce={nonce} d=0x{hex}")?;
         emit_summary(
@@ -289,7 +326,7 @@ mod tests {
         assert_eq!(outcome.nonce, Some(0x1234));
 
         let mut log = BufWriter::new(File::create(&out).unwrap());
-        write_outcome(&mut log, &outcome, false).unwrap();
+        write_outcome(&mut log, &outcome, false, None).unwrap();
         let log = std::fs::read_to_string(&out).unwrap();
         assert!(log.contains("FOUND nonce=4660")); // 0x1234 = 4660
         assert!(log.contains(&format!("d=0x{}", scalar_hex(&Scalar::from(0x3039u64)))));
@@ -319,7 +356,7 @@ mod tests {
         assert_eq!(outcome.nonce, None);
 
         let mut log = BufWriter::new(File::create(&out).unwrap());
-        write_outcome(&mut log, &outcome, false).unwrap();
+        write_outcome(&mut log, &outcome, false, None).unwrap();
         assert!(std::fs::read_to_string(&out)
             .unwrap()
             .contains("No key found"));
@@ -349,6 +386,7 @@ mod tests {
                 threads: None,
                 quiet: true,
                 outfile: "   ".into(),
+                offset: "0".into(),
             },
         )
         .expect_err("should reject empty");

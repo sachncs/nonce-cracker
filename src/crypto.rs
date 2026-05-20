@@ -235,6 +235,24 @@ pub fn affine_key(affine: &AffinePoint) -> [u8; 33] {
     key
 }
 
+/// Encode the first 16 bytes of a compressed affine point as a `u128` key.
+///
+/// Collision probability for a table with `m` entries is `m² / 2¹²⁹`, which is
+/// negligible for all supported ranges.  Any collision is caught by the
+/// cryptographic verification step, so this is safe.
+#[inline]
+#[must_use]
+pub fn affine_key_prefix(affine: &AffinePoint) -> u128 {
+    use k256::elliptic_curve::point::AffineCoordinates;
+    let x = affine.x();
+    let x_bytes: &[u8] = x.as_ref();
+    let prefix = if affine.y_is_odd().into() { 0x03u8 } else { 0x02u8 };
+    let mut buf = [0u8; 16];
+    buf[0] = prefix;
+    buf[1..16].copy_from_slice(&x_bytes[..15]);
+    u128::from_be_bytes(buf)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

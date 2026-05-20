@@ -91,14 +91,12 @@ fn bench_openmap(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("insert_get", size), size, |b, &size| {
             let mut map = OpenMap::with_capacity(size);
             for i in 0..size {
-                let mut key = [0u8; 33];
-                key[..8].copy_from_slice(&(i as u64).to_le_bytes());
-                map.insert(key, i as u128);
+                let key = u128::from(i);
+                map.insert(key, i as u64);
             }
             b.iter(|| {
-                let mut key = [0u8; 33];
-                key[..8].copy_from_slice(&(42u64).to_le_bytes());
-                map.get(&key)
+                let key = u128::from(42u64);
+                map.get(key)
             });
         });
     }
