@@ -117,7 +117,7 @@ jobs:
         run: cargo build --release --target ${{ matrix.target }}
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: nonce-cracker-${{ matrix.target }}
           path: target/${{ matrix.target }}/release/nonce-cracker${{ matrix.target == 'x86_64-pc-windows-msvc' && '.exe' || '' }}
