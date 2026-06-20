@@ -250,13 +250,34 @@ nonce-cracker/
 │   └── bench_bsgs.rs    # End-to-end BSGS benchmark
 ├── docs/
 │   ├── affine-relation-derivation.md  # Mathematical derivation
-│   └── DEPLOYMENT.md                  # Deployment guide
+│   ├── DEPLOYMENT.md                  # Deployment guide
+│   └── faq.md                         # Frequently asked questions
+├── .github/
+│   ├── workflows/ci.yml              # CI/CD pipeline
+│   ├── dependabot.yml                # Dependency auto-updates
+│   ├── FUNDING.yml                   # Sponsorship links
+│   ├── PULL_REQUEST_TEMPLATE.md      # PR template
+│   └── ISSUE_TEMPLATE/
+│       ├── bug_report.md             # Bug report template
+│       └── feature_request.md        # Feature request template
 ├── Cargo.toml
+├── Cargo.lock
 ├── rust-toolchain.toml
-├── Makefile
-├── setup.sh
-├── cleanup.sh
-└── README.md
+├── deny.toml                         # cargo-deny configuration
+├── Dockerfile                        # Multi-stage Docker build
+├── Makefile                          # Convenience commands
+├── setup.sh                          # Quick setup script
+├── cleanup.sh                        # Build artifact cleanup
+├── LICENSE-MIT
+├── LICENSE-APACHE
+├── README.md
+├── CONTRIBUTING.md
+├── CODE_OF_CONDUCT.md
+├── SECURITY.md
+├── CHANGELOG.md
+├── .editorconfig
+├── .gitignore
+└── .gitattributes
 ```
 
 ### Module overview
@@ -439,11 +460,15 @@ Benchmarks cover:
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for:
-- Development setup
-- Coding standards
-- Testing guidelines
-- Pull request process
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, coding standards, and pull request process. This project follows the [Contributor Covenant Code of Conduct](CODE_OF_CONDUCT.md).
+
+## Code of Conduct
+
+See [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
+
+## Security
+
+See [SECURITY.md](SECURITY.md) for vulnerability reporting and supported versions.
 
 ## License
 

@@ -4,8 +4,9 @@
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 0.2.x   | :white_check_mark: |
-| 0.1.x   | :x:                |
+| 0.6.x   | :white_check_mark: |
+| 0.5.x   | :white_check_mark: |
+| < 0.5   | :x:                |
 
 ## Security Features
 
@@ -69,7 +70,7 @@ When deploying in production:
 
 1. **Side-channel attacks**: The current implementation does not implement constant-time defense against all side-channel attacks. This is acceptable for offline key recovery but not for online signing.
 
-2. **Memory clearing**: Cryptographic values are not explicitly cleared from memory after use. This is a known limitation of the current implementation.
+2. **Memory clearing**: Cryptographic values are zeroized via `Zeroize` + `Drop` on `Signature`, `SearchOutcome`, and temporary intermediates. However, the Rust allocator may retain freed memory temporarily.
 
 3. **Error messages**: Error messages may contain sensitive information in debug builds. Use release builds for production.
 

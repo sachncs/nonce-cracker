@@ -233,9 +233,7 @@ Include:
 
 ## Code of Conduct
 
-- Be respectful and inclusive
-- Focus on constructive feedback
-- Follow Rust's community guidelines
+This project follows the [Contributor Covenant Code of Conduct](CODE_OF_CONDUCT.md). By participating, you are expected to uphold this code. Please report unacceptable behavior to security@example.com.
 
 ## License
 
