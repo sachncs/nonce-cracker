@@ -23,7 +23,7 @@ rustc-hash = "2"
 signal-hook = "0.3"
 zeroize = { version = "1.8", features = ["derive"] }
 tracing = { version = "0.1", features = ["attributes"] }
-thiserror = "1"
+thiserror = "2"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 
 [dev-dependencies]
