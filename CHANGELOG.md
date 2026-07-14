@@ -133,7 +133,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The default demo command is now `example` instead of the previous `demo` naming used in earlier revisions.
 - Search range arguments now accept signed values explicitly; callers relying on unsigned-only assumptions must update their invocation patterns.
 
-## [0.1.0] - 2024-01-01
+## [0.1.0] - 2026-04-06
 
 ### Added
 - Initial release
@@ -143,3 +143,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CLI interface with clap
 - Unit tests for core cryptographic functions
 - Example mode for quick demonstration
+
+[Unreleased]: https://github.com/sachncs/nonce-cracker/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/sachncs/nonce-cracker/compare/v0.2.0...v0.6.0
+[0.2.0]: https://github.com/sachncs/nonce-cracker/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/sachncs/nonce-cracker/releases/tag/v0.1.0

@@ -14,11 +14,11 @@ Thank you for your interest in contributing to nonce-cracker!
 
 ```bash
 # Clone your fork
-git clone https://github.com/sachn-cs/nonce-cracker.git
+git clone https://github.com/sachncs/nonce-cracker.git
 cd nonce-cracker
 
 # Add upstream remote
-git remote add upstream https://github.com/sachn-cs/nonce-cracker.git
+git remote add upstream https://github.com/sachncs/nonce-cracker.git
 
 # Install pre-commit hooks
 make install-hooks

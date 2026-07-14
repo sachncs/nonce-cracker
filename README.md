@@ -1,6 +1,6 @@
 # nonce-cracker
 
-[![Build](https://img.shields.io/github/actions/workflow/status/sachn-cs/nonce-cracker/ci.yml?style=flat-square)](https://github.com/sachn-cs/nonce-cracker/actions)
+[![Build](https://img.shields.io/github/actions/workflow/status/sachncs/nonce-cracker/ci.yml?style=flat-square)](https://github.com/sachncs/nonce-cracker/actions)
 [![crate](https://img.shields.io/crates/v/nonce-cracker?style=flat-square)](https://crates.io/crates/nonce-cracker)
 [![docs](https://img.shields.io/docsrs/nonce-cracker?style=flat-square)](https://docs.rs/nonce-cracker)
 
@@ -98,7 +98,7 @@ cargo install nonce-cracker
 ### From source
 
 ```bash
-git clone https://github.com/sachn-cs/nonce-cracker.git
+git clone https://github.com/sachncs/nonce-cracker.git
 cd nonce-cracker
 cargo build --release
 ./target/release/nonce-cracker --help
