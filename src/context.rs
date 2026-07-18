@@ -1,10 +1,9 @@
-//! Application context that owns global resources.
+//! Cooperative shutdown coordination.
 //!
-//! [`AppContext`] is constructed once in `main` and passed down.
-//! It holds configuration and a [`ShutdownToken`] that replaces the old
-//! global `SHUTDOWN` static.
+//! [`ShutdownToken`] is a clonable handle to a shared `AtomicBool`.  It is
+//! constructed once in `main` and cloned into the search engine; the signal
+//! handler mutates the underlying flag while workers observe it.
 
-use crate::config::Config;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -29,18 +28,12 @@ impl ShutdownToken {
         }
     }
 
-    /// Signal shutdown.  Safe to call from any thread (e.g. a signal handler).
-    ///
-    /// Uses [`Ordering::SeqCst`] to ensure the signal is immediately visible
-    /// to all worker threads on any platform.
+    /// Signal shutdown. Safe to call from any thread (e.g. a signal handler).
     pub fn signal(&self) {
         self.inner.store(true, Ordering::Release);
     }
 
     /// Check whether shutdown has been requested.
-    ///
-    /// Uses [`Ordering::Acquire`]; paired with [`signal`](Self::signal) this
-    /// guarantees that any signal set before this call is observed.
     #[must_use]
     pub fn is_signalled(&self) -> bool {
         self.inner.load(Ordering::Acquire)
@@ -50,29 +43,6 @@ impl ShutdownToken {
 impl Default for ShutdownToken {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-/// Top-level context that owns all process-wide resources.
-///
-/// Construct once in `main` and pass `&ctx` (or cheap clone handles) to
-/// subsystems.  The contained [`ShutdownToken`] can be cloned and passed
-/// to a signal handler so workers can observe shutdown requests.
-pub struct AppContext {
-    /// Loaded configuration.
-    pub config: Config,
-    /// Shutdown coordination token.
-    pub shutdown: ShutdownToken,
-}
-
-impl AppContext {
-    /// Create a new context from the given configuration.
-    #[must_use]
-    pub fn new(config: Config) -> Self {
-        Self {
-            config,
-            shutdown: ShutdownToken::new(),
-        }
     }
 }
 
@@ -92,18 +62,5 @@ mod tests {
     fn test_shutdown_token_default() {
         let token = ShutdownToken::default();
         assert!(!token.is_signalled());
-    }
-
-    #[test]
-    fn test_app_context_new() {
-        let config = Config {
-            max_threads: 4,
-            log_dir: std::path::PathBuf::from("/tmp"),
-            checkpoint_dir: std::path::PathBuf::from("/tmp/checkpoints"),
-            version: "test",
-        };
-        let ctx = AppContext::new(config);
-        assert_eq!(ctx.config.max_threads, 4);
-        assert!(!ctx.shutdown.is_signalled());
     }
 }

@@ -2,7 +2,7 @@ mod cli;
 
 use clap::Parser;
 use cli::Commands;
-use nonce_cracker::{logging::init as init_logging, AppContext, Config};
+use nonce_cracker::{logging::init as init_logging, Config, ShutdownToken};
 use tracing::{error, info};
 
 fn main() {
@@ -23,10 +23,9 @@ fn main() {
         std::process::exit(1);
     }
 
-    let ctx = AppContext::new(config);
-
+    let shutdown = ShutdownToken::new();
     {
-        let shutdown = ctx.shutdown.clone();
+        let shutdown = shutdown.clone();
         ctrlc::set_handler(move || {
             info!("shutdown signal received");
             shutdown.signal();
@@ -37,18 +36,18 @@ fn main() {
         });
     }
 
-    info!(version = ctx.config.version, "starting");
+    info!(version = config.version, "starting");
 
     let cli = cli::Cli::parse();
     let code = match cli.command.unwrap_or(Commands::Example) {
-        Commands::Example => cli::run_example(&ctx).map_or_else(
+        Commands::Example => cli::run_example(&config, &shutdown).map_or_else(
             |e| {
                 error!("example failed: {e}");
                 1
             },
             |()| 0,
         ),
-        Commands::Search(args) => cli::run_search(&ctx, &args).map_or_else(
+        Commands::Search(args) => cli::run_search(&config, &shutdown, &args).map_or_else(
             |e| {
                 error!("search failed: {e}");
                 1

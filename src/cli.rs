@@ -10,8 +10,8 @@ use k256::elliptic_curve::{sec1::ToEncodedPoint, PrimeField};
 use k256::{ProjectivePoint, PublicKey, Scalar};
 use nonce_cracker::{
     derive_private_key, logging::emit_summary, parse_int, parse_pubkey, parse_scalar, scalar_hex,
-    verify_ecdsa_signature, AppContext, CryptoError, Error, RangeError, Result, SearchEngine,
-    SearchOutcome, SearchSpec, Signature,
+    verify_ecdsa_signature, Config, CryptoError, Error, RangeError, Result, SearchEngine,
+    SearchOutcome, SearchSpec, ShutdownToken, Signature,
 };
 use std::{
     fs::File,
@@ -90,7 +90,7 @@ pub enum Commands {
 }
 
 /// Execute a search using the provided CLI arguments.
-pub fn run_search(ctx: &AppContext, args: &SearchArgs) -> Result<()> {
+pub fn run_search(config: &Config, shutdown: &ShutdownToken, args: &SearchArgs) -> Result<()> {
     if args.outfile.trim().is_empty() {
         return Err(Error::Range(RangeError::EmptyOutfile));
     }
@@ -111,17 +111,12 @@ pub fn run_search(ctx: &AppContext, args: &SearchArgs) -> Result<()> {
     let (search_target, search_sig, d_offset) = if offset == k256::Scalar::ZERO {
         (target, sig, None)
     } else {
-        // Offset mode: search for d_new = alpha * k where d_new = d - offset.
-        // Adjust target: Q_new = Q - offset * G.
-        // Use z=0 signature so beta=0 in the search.
         let offset_point = k256::ProjectivePoint::GENERATOR * offset;
         let target_affine: k256::AffinePoint = *target.as_affine();
         let adjusted: k256::AffinePoint =
             (k256::ProjectivePoint::from(target_affine) - offset_point).to_affine();
-        let adjusted_pk =
-            k256::PublicKey::from_affine(adjusted).map_err(|e| {
-                CryptoError::PubkeyParse(format!("adjusted target public key: {e}"))
-            })?;
+        let adjusted_pk = k256::PublicKey::from_affine(adjusted)
+            .map_err(|e| CryptoError::PubkeyParse(format!("adjusted target public key: {e}")))?;
         let search_sig = Signature::new(sig.r, sig.s, k256::Scalar::ZERO);
         (adjusted_pk, search_sig, Some(offset))
     };
@@ -132,9 +127,9 @@ pub fn run_search(ctx: &AppContext, args: &SearchArgs) -> Result<()> {
         parse_int(&args.step)?,
     )?;
 
-    let engine = SearchEngine::new(&ctx.config, args.threads, ctx.shutdown.clone())?;
+    let engine = SearchEngine::new(config, args.threads, shutdown.clone())?;
 
-    let out = resolve_path(&ctx.config.log_dir, &args.outfile)?;
+    let out = resolve_path(&config.log_dir, &args.outfile)?;
     if let Some(parent) = out.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -150,7 +145,7 @@ pub fn run_search(ctx: &AppContext, args: &SearchArgs) -> Result<()> {
 }
 
 /// Run the built-in demonstration with a hard-coded single signature.
-pub fn run_example(ctx: &AppContext) -> Result<()> {
+pub fn run_example(config: &Config, shutdown: &ShutdownToken) -> Result<()> {
     let d = Scalar::from(0x3039u64);
     let nonce = 0x1234u64;
     let z = Scalar::from(1u64);
@@ -177,9 +172,9 @@ pub fn run_example(ctx: &AppContext) -> Result<()> {
     let sig = Signature::new(r, s, z);
     let spec = SearchSpec::new(0, 0x2000, 1)?;
 
-    let engine = SearchEngine::new(&ctx.config, None, ctx.shutdown.clone())?;
+    let engine = SearchEngine::new(config, None, shutdown.clone())?;
 
-    let out = resolve_path(&ctx.config.log_dir, "example.log")?;
+    let out = resolve_path(&config.log_dir, "example.log")?;
     if let Some(parent) = out.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -291,16 +286,12 @@ mod tests {
             checkpoint_dir: std::env::temp_dir().join("checkpoints"),
             version: "test",
         };
-        let ctx = AppContext::new(config);
+        let shutdown = ShutdownToken::new();
         let (sig, pk) = fixture();
         let out = temp_log("nonce_found");
         let spec = SearchSpec::new(0, 0x2000, 1).unwrap();
-        let engine = SearchEngine::new(
-            &ctx.config,
-            None,
-            ctx.shutdown.clone(),
-        )
-        .unwrap();
+        let engine = SearchEngine::new(&config, None, shutdown.clone())
+            .unwrap();
         let outcome = engine.search(&spec, &sig, &pk).unwrap();
         assert_eq!(outcome.nonce, Some(0x1234));
 
@@ -320,15 +311,11 @@ mod tests {
             checkpoint_dir: std::env::temp_dir().join("checkpoints"),
             version: "test",
         };
-        let ctx = AppContext::new(config);
+        let shutdown = ShutdownToken::new();
         let (sig, pk) = fixture();
         let out = temp_log("nonce_miss");
         let spec = SearchSpec::new(0, 0, 1).unwrap();
-        let engine = SearchEngine::new(
-            &ctx.config,
-            None,
-            ctx.shutdown.clone(),
-        )
+        let engine = SearchEngine::new(&config, None, shutdown.clone())
         .unwrap();
         let outcome = engine.search(&spec, &sig, &pk).unwrap();
         assert_eq!(outcome.nonce, None);
@@ -349,10 +336,11 @@ mod tests {
             checkpoint_dir: std::env::temp_dir().join("checkpoints"),
             version: "test",
         };
-        let ctx = AppContext::new(config);
+        let shutdown = ShutdownToken::new();
         let (sig, pk) = fixture();
         let err = run_search(
-            &ctx,
+            &config,
+            &shutdown,
             &SearchArgs {
                 r: scalar_to_hex(&sig.r),
                 s: scalar_to_hex(&sig.s),
@@ -435,10 +423,11 @@ mod tests {
             checkpoint_dir: std::env::temp_dir().join("checkpoints"),
             version: "test",
         };
-        let ctx = AppContext::new(config);
+        let shutdown = ShutdownToken::new();
         let (sig, pk) = fixture();
         let err = run_search(
-            &ctx,
+            &config,
+            &shutdown,
             &SearchArgs {
                 r: scalar_to_hex(&sig.r),
                 s: scalar_to_hex(&sig.s),

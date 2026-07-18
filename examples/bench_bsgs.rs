@@ -19,8 +19,8 @@ use k256::{
     ProjectivePoint, PublicKey, Scalar,
 };
 use nonce_cracker::{
-    derive_affine_constants, derive_private_key, verify_ecdsa_signature, AppContext, Config,
-    SearchEngine, SearchSpec, Signature,
+    derive_affine_constants, derive_private_key, verify_ecdsa_signature, Config, SearchEngine,
+    SearchSpec, ShutdownToken, Signature,
 };
 use rand::Rng;
 
@@ -91,15 +91,10 @@ fn main() {
         checkpoint_dir: std::env::temp_dir().join("checkpoints"),
         version: "bench",
     };
-    let ctx = AppContext::new(config);
+    let shutdown = ShutdownToken::new();
     let spec = SearchSpec::new(0, end as i128, 1).unwrap();
 
-    let engine = SearchEngine::new(
-        &ctx.config,
-        None,
-        ctx.shutdown.clone(),
-    )
-    .unwrap();
+    let engine = SearchEngine::new(&config, None, shutdown).unwrap();
 
     let start = std::time::Instant::now();
     let outcome = engine.search(&spec, &sig, &pk).unwrap();

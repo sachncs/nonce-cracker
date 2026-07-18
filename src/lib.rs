@@ -33,7 +33,7 @@ pub mod fixtures;
 pub use checkpoint::Checkpoint;
 pub use config::Config;
 pub use config::ConfigError;
-pub use context::{AppContext, ShutdownToken};
+pub use context::ShutdownToken;
 pub use domain::{SearchOutcome, SearchSpec, Signature};
 pub use error::{CryptoError, Error, RangeError, Result};
 pub use search::SearchEngine;
