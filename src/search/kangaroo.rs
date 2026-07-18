@@ -45,7 +45,7 @@ pub fn search(
 
     // Degenerate case: alpha == 0 means all candidates have the same discrete log.
     if params.alpha == Scalar::ZERO {
-        let d0_scalar = crate::crypto::derive_private_key(params.start, params.alpha, params.beta);
+        let d0_scalar = crate::crypto::derive_private_key(params.start.unsigned_abs(), params.alpha, params.beta);
         let d0_point = ProjectivePoint::GENERATOR * d0_scalar;
         if d0_point == params.h {
             return Ok(Some(params.start));
@@ -111,7 +111,7 @@ pub fn search(
             // Each thread runs one tame and one wild walk
             let mut tame_dist = 0u64;
             let mut tame = ProjectivePoint::GENERATOR
-                * crate::crypto::derive_private_key(params.start, params.alpha, params.beta);
+                * crate::crypto::derive_private_key(params.start.unsigned_abs(), params.alpha, params.beta);
 
             let mut wild_dist = 0u64;
             let mut wild = params.h;
@@ -188,7 +188,7 @@ pub fn search(
                             if idx >= 0 && (idx as u128) < params.total {
                                 let verify_point = ProjectivePoint::GENERATOR
                                     * crate::crypto::derive_private_key(
-                                        candidate, params.alpha, params.beta,
+                                        candidate.unsigned_abs(), params.alpha, params.beta,
                                     );
                                 if verify_point == params.h {
                                     if result

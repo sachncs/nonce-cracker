@@ -48,7 +48,7 @@ fn bench_derive_private_key(c: &mut Criterion) {
     let beta = Scalar::from(7u64);
 
     c.bench_function("derive_private_key", |b| {
-        b.iter(|| derive_private_key(black_box(42i128), black_box(alpha), black_box(beta)));
+        b.iter(|| derive_private_key(black_box(42u128), black_box(alpha), black_box(beta)));
     });
 }
 
@@ -69,7 +69,7 @@ fn bench_search_chunk(c: &mut Criterion) {
             let step_scalar = alpha * Scalar::from(1u64);
             let step_point = ProjectivePoint::GENERATOR * step_scalar;
 
-            let mut cur_scalar = derive_private_key(0, alpha, beta);
+            let mut cur_scalar = derive_private_key(0u128, alpha, beta);
             let mut point = ProjectivePoint::GENERATOR * cur_scalar;
 
             b.iter(|| {
@@ -91,7 +91,7 @@ fn bench_openmap(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("insert_get", size), size, |b, &size| {
             let mut map = OpenMap::with_capacity(size);
             for i in 0..size {
-                let key = u128::from(i);
+                let key = u128::from(u64::from(i as u32));
                 map.insert(key, i as u64);
             }
             b.iter(|| {

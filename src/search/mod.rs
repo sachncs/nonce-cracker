@@ -129,7 +129,7 @@ impl SearchEngine {
         let (alpha, beta) = derive_affine_constants(sig)?;
 
         let target_affine: AffinePoint = *target.as_affine();
-        let d0_scalar = derive_private_key(spec.start, alpha, beta);
+        let d0_scalar = derive_private_key(spec.start.unsigned_abs(), alpha, beta);
         let d0_point = ProjectivePoint::GENERATOR * d0_scalar;
         if d0_point == target_affine {
             let outcome = SearchOutcome::new(Some(spec.start), alpha, beta);

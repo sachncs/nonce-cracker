@@ -51,7 +51,7 @@ pub fn search(
         "IDENTITY_KEY sentinel must match AffinePoint::IDENTITY encoding");
 
     let target_affine: AffinePoint = *scan.target.as_affine();
-    let d0_scalar = crate::crypto::derive_private_key(scan.start, scan.alpha, scan.beta);
+    let d0_scalar = crate::crypto::derive_private_key(scan.start.unsigned_abs(), scan.alpha, scan.beta);
     let d0_point = ProjectivePoint::GENERATOR * d0_scalar;
 
     if d0_point == target_affine {

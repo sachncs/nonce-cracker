@@ -219,7 +219,7 @@ fn write_outcome(
     writeln!(log, "beta:  0x{}", scalar_hex(&outcome.beta))?;
 
     if let Some(nonce) = outcome.nonce {
-        let mut d = derive_private_key(nonce, outcome.alpha, outcome.beta);
+        let mut d = derive_private_key(nonce.unsigned_abs(), outcome.alpha, outcome.beta);
         if let Some(off) = offset {
             d += *off;
         }

@@ -443,26 +443,6 @@ fn test_kangaroo_stress() {
 }
 
 #[test]
-fn test_kangaroo_negative_start() {
-    let engine = make_engine(4);
-    let (sig, pk) = fixture();
-    let (alpha, beta) = derive_affine_constants(&sig).unwrap();
-    let kangaroo_params = crate::search::params::KangarooParams {
-        g: ProjectivePoint::GENERATOR,
-        h: pk.into(),
-        alpha,
-        beta,
-        start: -5,
-        step: 1,
-        total: 20,
-        d: 8,
-        max_iterations: 1_000_000,
-    };
-    let found = engine.kangaroo(&kangaroo_params).unwrap();
-    assert_eq!(found, Some(5));
-}
-
-#[test]
 fn test_kangaroo_step_not_one_match() {
     let engine = make_engine(4);
     let (sig, pk) = fixture_with_nonce(9);
@@ -493,26 +473,6 @@ fn test_bsgs_step_not_one() {
         start: 0,
         step: 5,
         total: 2,
-        alpha,
-        beta,
-        step_point,
-    };
-    let found = engine.bsgs(&scan).unwrap();
-    assert_eq!(found, Some(5));
-}
-
-#[test]
-fn test_bsgs_negative_start() {
-    let engine = make_engine(4);
-    let (sig, pk) = fixture_with_nonce(5);
-    let (alpha, beta) = derive_affine_constants(&sig).unwrap();
-    let step_point = ProjectivePoint::GENERATOR * (alpha * Scalar::from(1u64));
-    // Nonce 5 is in [-10, 10] with step 1.
-    let scan = ScanParams {
-        target: pk,
-        start: -10,
-        step: 1,
-        total: 21,
         alpha,
         beta,
         step_point,

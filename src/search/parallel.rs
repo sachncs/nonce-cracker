@@ -32,7 +32,7 @@ pub fn scan(
 
     // Precompute the base point for start to avoid per-chunk scalar mults.
     let base_point =
-        ProjectivePoint::GENERATOR * derive_private_key(scan.start, scan.alpha, scan.beta);
+        ProjectivePoint::GENERATOR * derive_private_key(scan.start.unsigned_abs(), scan.alpha, scan.beta);
 
     pool.install(|| {
         (0..thread_count).into_par_iter().for_each(|thread_id| {

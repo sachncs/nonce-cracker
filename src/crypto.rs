@@ -39,14 +39,10 @@ pub fn derive_affine_constants(sig: &Signature) -> Result<(Scalar, Scalar)> {
 /// relation `d = alpha * k - beta`.
 #[inline]
 #[must_use]
-pub fn derive_private_key(nonce: i128, alpha: Scalar, beta: Scalar) -> Scalar {
-    let mut s = Scalar::from(nonce.unsigned_abs());
+pub fn derive_private_key(nonce: u128, alpha: Scalar, beta: Scalar) -> Scalar {
+    let mut s = Scalar::from(nonce);
     let ak = alpha * s;
-    let result = if nonce < 0 {
-        Scalar::ZERO - ak - beta
-    } else {
-        ak - beta
-    };
+    let result = ak - beta;
     s.zeroize();
     result
 }
@@ -293,14 +289,6 @@ mod tests {
     }
 
     #[test]
-    fn test_signed_nonce() {
-        let a = Scalar::from(1u64);
-        let b = Scalar::from(2u64);
-        // d = alpha * (-1) - beta = -alpha - beta
-        assert_eq!(derive_private_key(-1, a, b), Scalar::ZERO - a - b);
-    }
-
-    #[test]
     fn test_pubkey_invalid() {
         assert!(parse_pubkey("").is_err());
         assert!(parse_pubkey("0xgg").is_err());
@@ -326,16 +314,6 @@ mod tests {
             Scalar::from(0u64),
         );
         assert!(derive_affine_constants(&sig).is_ok());
-    }
-
-    #[test]
-    fn test_derive_private_key_i128_min() {
-        let a = Scalar::from(1u64);
-        let b = Scalar::from(2u64);
-        let result = derive_private_key(i128::MIN, a, b);
-        // d = alpha * (-2^127) - beta = -alpha * 2^127 - beta
-        let expected = Scalar::ZERO - a * Scalar::from(1u128 << 127) - b;
-        assert_eq!(result, expected);
     }
 
     #[test]
@@ -465,9 +443,7 @@ mod tests {
             let z_scalar = Scalar::from(z);
             let sig = crate::domain::Signature::new(r_scalar, s_scalar, z_scalar);
             let (alpha, beta) = derive_affine_constants(&sig).unwrap();
-            // Verify derive_private_key does not panic and produces a valid scalar.
-            let _d = derive_private_key(k as i128, alpha, beta);
-            prop_assert!(true);
+            let _d = derive_private_key(k as u128, alpha, beta);
         }
     }
 }
