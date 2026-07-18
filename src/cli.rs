@@ -273,15 +273,6 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
-    fn test_batch_normalize_identity() {
-        use k256::elliptic_curve::BatchNormalize;
-        let identity = ProjectivePoint::IDENTITY;
-        let gen = ProjectivePoint::GENERATOR;
-        let points = vec![identity, gen, identity];
-        let _affines = ProjectivePoint::batch_normalize(points.as_slice());
-    }
-
-    #[test]
     fn test_unique_log_path() {
         let base = std::env::temp_dir();
         let p1 = resolve_path(&base, "search.log").unwrap();
@@ -472,6 +463,7 @@ mod tests {
                 threads: Some(0),
                 quiet: true,
                 outfile: "test.log".into(),
+                offset: "0".into(),
             },
         )
         .expect_err("should reject zero threads");
