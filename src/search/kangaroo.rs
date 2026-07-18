@@ -41,8 +41,6 @@ pub fn search(
     shutdown: &ShutdownToken,
     params: &KangarooParams,
 ) -> Result<Option<i128>> {
-    params.validate()?;
-
     // Degenerate case: alpha == 0 means all candidates have the same discrete log.
     if params.alpha == Scalar::ZERO {
         let d0_scalar = crate::crypto::derive_private_key(params.start.unsigned_abs(), params.alpha, params.beta);

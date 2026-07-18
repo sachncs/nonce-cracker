@@ -104,7 +104,6 @@ impl KangarooParams {
         if max_iterations == 0 {
             return Err(crate::error::EngineError::KangarooParamsInvalid("max_iterations must be > 0".into()).into());
         }
-        // Validate that the full range fits in i128 to prevent silent overflow
         let n = (total - 1) as i128;
         let _ = start
             .checked_add(n.checked_mul(step).ok_or(crate::error::RangeError::RangeOverflow)?)
@@ -120,21 +119,5 @@ impl KangarooParams {
             d,
             max_iterations,
         })
-    }
-
-    /// Validate existing parameters.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`EngineError::KangarooParamsInvalid`] if `d == 0`, `d > 264`, or
-    /// `max_iterations == 0`.
-    pub fn validate(&self) -> crate::error::Result<()> {
-        if self.d == 0 || self.d > 264 {
-            return Err(crate::error::EngineError::KangarooParamsInvalid(format!("d={} out of range [1, 264]", self.d)).into());
-        }
-        if self.max_iterations == 0 {
-            return Err(crate::error::EngineError::KangarooParamsInvalid("max_iterations must be > 0".into()).into());
-        }
-        Ok(())
     }
 }
