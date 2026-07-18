@@ -11,42 +11,11 @@
 //! | `NONCE_CRACKER_LOG_LEVEL` | Minimum level (`error`..`trace`) | `info` |
 //! | `NONCE_CRACKER_LOG_CONSOLE` | Mirror logs to stdout (`1`/`true`) | `true` |
 
-use std::{
-    fmt,
-    fs::File,
-    io::{self, Write},
-    path::Path,
-    sync::atomic::{AtomicBool, Ordering},
-    sync::Arc,
-};
+use std::{fs::File, io, io::Write, path::Path};
 use tracing::Level;
 use tracing_subscriber::{
     filter::LevelFilter, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter,
 };
-
-/// Type-erased log writer that never panics.
-///
-/// Falls back to an in-memory sink if file cloning fails.
-enum LogWriter {
-    File(File),
-    Sink(io::Sink),
-}
-
-impl Write for LogWriter {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        match self {
-            LogWriter::File(f) => f.write(buf),
-            LogWriter::Sink(s) => s.write(buf),
-        }
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        match self {
-            LogWriter::File(f) => f.flush(),
-            LogWriter::Sink(s) => s.flush(),
-        }
-    }
-}
 
 const DEFAULT_LOG_FILE: &str = "nonce-cracker.log";
 
@@ -56,7 +25,7 @@ pub enum LoggingError {
     /// The supplied level string was not recognised.
     #[error("invalid log level: {0}")]
     InvalidLevel(String),
-    /// The log file could not be opened or cloned.
+    /// The log file could not be opened.
     #[error("logger initialization failed: {0}")]
     Logger(String),
 }
@@ -70,10 +39,7 @@ pub enum LoggingError {
 ///
 /// Returns [`LoggingError::InvalidLevel`] if `NONCE_CRACKER_LOG_LEVEL` is set to
 /// an unrecognised value, or [`LoggingError::Logger`] if the log file cannot be
-/// opened or cloned.
-///
-/// The file writer falls back to an in-memory buffer if cloning fails,
-/// so this function never panics due to descriptor exhaustion.
+/// opened.
 pub fn init(log_dir: &Path, console: bool) -> Result<(), LoggingError> {
     let level = match std::env::var("NONCE_CRACKER_LOG_LEVEL") {
         Ok(v) => parse_level(&v)?,
@@ -91,21 +57,9 @@ pub fn init(log_dir: &Path, console: bool) -> Result<(), LoggingError> {
         .map_err(|e| LoggingError::Logger(e.to_string()))?;
 
     let subscriber = tracing_subscriber::registry::Registry::default().with(env_filter);
-
-    let file2 = file
-        .try_clone()
-        .map_err(|e| LoggingError::Logger(format!("clone log file: {e}")))?;
-    let sink_warned = Arc::new(AtomicBool::new(false));
     let fmt_layer = tracing_subscriber::fmt::layer()
         .compact()
-        .with_writer(move || {
-            file2.try_clone().map(LogWriter::File).unwrap_or_else(|_| {
-                if !sink_warned.swap(true, Ordering::SeqCst) {
-                    eprintln!("warning: log file descriptor clone failed; logging to null sink");
-                }
-                LogWriter::Sink(std::io::sink())
-            })
-        });
+        .with_writer(move || file.try_clone().expect("log file descriptor cloneable"));
 
     if console {
         let console_layer = tracing_subscriber::fmt::layer()
@@ -125,16 +79,18 @@ pub fn init(log_dir: &Path, console: bool) -> Result<(), LoggingError> {
 ///
 /// This is used to report the final search result so it is visible even when
 /// console logging is disabled.
-pub fn emit_summary(level: Level, message: impl fmt::Display, console: bool) {
+pub fn emit_summary(level: Level, message: impl std::fmt::Display, console: bool) {
+    let event = format!("{message}");
     match level {
-        Level::ERROR => tracing::error!("{message}"),
-        Level::WARN => tracing::warn!("{message}"),
-        Level::INFO => tracing::info!("{message}"),
-        Level::DEBUG => tracing::debug!("{message}"),
-        Level::TRACE => tracing::trace!("{message}"),
+        Level::ERROR => tracing::error!("{event}"),
+        Level::WARN => tracing::warn!("{event}"),
+        Level::INFO => tracing::info!("{event}"),
+        Level::DEBUG => tracing::debug!("{event}"),
+        Level::TRACE => tracing::trace!("{event}"),
     }
     if console {
-        if let Err(e) = writeln!(io::stdout().lock(), "{message}") {
+        let mut out = io::stdout().lock();
+        if let Err(e) = writeln!(out, "{event}") {
             tracing::warn!("failed to write summary to stdout: {e}");
         }
     }
@@ -164,7 +120,6 @@ pub fn parse_level(value: &str) -> Result<LevelFilter, LoggingError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tracing::Level;
 
     #[test]
     fn test_parse_level_all_variants() {
@@ -182,14 +137,5 @@ mod tests {
     fn test_parse_level_invalid() {
         let err = parse_level("invalid").unwrap_err();
         assert!(err.to_string().contains("invalid"));
-    }
-
-    #[test]
-    fn test_emit_summary_all_levels() {
-        emit_summary(Level::ERROR, "error msg", false);
-        emit_summary(Level::WARN, "warn msg", false);
-        emit_summary(Level::INFO, "info msg", false);
-        emit_summary(Level::DEBUG, "debug msg", false);
-        emit_summary(Level::TRACE, "trace msg", false);
     }
 }
