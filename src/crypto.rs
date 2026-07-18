@@ -5,7 +5,7 @@
 //! engine and CLI.
 
 use crate::domain::Signature;
-use crate::error::{CryptoError, Result};
+use crate::error::{CryptoError, RangeError, Result};
 use zeroize::Zeroize;
 use k256::{
     ecdsa::{signature::hazmat::PrehashVerifier, Signature as EcdsaSignature, VerifyingKey},
@@ -171,9 +171,6 @@ pub fn parse_pubkey(s: &str) -> Result<PublicKey> {
     }
 }
 
-/// `i128::MIN` expressed as a `u128` magnitude.
-const I128_MIN_MAG: u128 = 1_u128 << 127;
-
 /// Parse a signed decimal or hex string into `i128`.
 ///
 /// Supports `0x` prefix for hex, optional `+`/`-` signs.
@@ -184,30 +181,27 @@ const I128_MIN_MAG: u128 = 1_u128 << 127;
 /// the `i128` range.
 pub fn parse_int(s: &str) -> Result<i128> {
     let s = s.trim();
-    let (neg, body) = s
-        .strip_prefix('-')
-        .map(|r| (true, r))
-        .or_else(|| s.strip_prefix('+').map(|r| (false, r)))
-        .unwrap_or((false, s));
+    let (neg, body) = match s.strip_prefix('-').or_else(|| s.strip_prefix('+')) {
+        Some(r) => (s.starts_with('-'), r),
+        None => (false, s),
+    };
 
-    let mag = if body.starts_with("0x") || body.starts_with("0X") {
-        u128::from_str_radix(&body[2..], 16).map_err(|_| crate::error::RangeError::I128Overflow)?
+    let mag: u128 = if let Some(hex) = body.strip_prefix("0x").or_else(|| body.strip_prefix("0X")) {
+        u128::from_str_radix(hex, 16).map_err(|_| RangeError::I128Overflow)?
     } else {
-        body.parse::<u128>()
-            .map_err(|_| crate::error::RangeError::I128Overflow)?
+        body.parse::<u128>().map_err(|_| RangeError::I128Overflow)?
     };
 
     if neg {
-        if mag > I128_MIN_MAG {
-            return Err(crate::error::RangeError::I128Overflow.into());
-        }
-        if mag == I128_MIN_MAG {
+        if mag > 1u128 << 127 {
+            Err(RangeError::I128Overflow.into())
+        } else if mag == 1u128 << 127 {
             Ok(i128::MIN)
         } else {
-            Ok(-(i128::try_from(mag).map_err(|_| crate::error::RangeError::I128Overflow)?))
+            Ok(-(mag as i128))
         }
     } else {
-        i128::try_from(mag).map_err(|_| crate::error::RangeError::I128Overflow.into())
+        i128::try_from(mag).map_err(|_| RangeError::I128Overflow.into())
     }
 }
 
