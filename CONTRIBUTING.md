@@ -237,4 +237,4 @@ This project follows the [Contributor Covenant Code of Conduct](CODE_OF_CONDUCT.
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the same licenses as the project (MIT or Apache 2.0).
+By contributing, you agree that your contributions will be licensed under the MIT License.

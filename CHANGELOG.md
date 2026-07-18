@@ -23,10 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Expected memory check in BSGS before table allocation.
 - Minimal checkpoint/resume scaffolding: `Checkpoint` struct with text serialization, `NONCE_CRACKER_CHECKPOINT_DIR` config, and write/remove around `SearchEngine::search`.
 - Property-based tests (`proptest`) for `OpenMap` round-trip, `parse_int`, and `derive_private_key` invariants.
-- `cargo-fuzz` harness under `fuzz/` with targets for `parse_scalar`, `parse_pubkey`, `parse_int`, and `openmap`.
 - Local `patches/k256/` fork exposing `ProjectivePoint::projective_x()` and `projective_z()` accessors to enable projective-coordinate hashing in the kangaroo hot path.
 
 ### Changed
+- Streamlined CI to formatting, linting, cross-platform tests, and `cargo-deny` checks; removed redundant builds, audits, release artifacts, and non-gating coverage.
 - **BSGS baby-step table is now sharded**: per-thread `OpenMap`s are kept separate; giant-step lookups scan all shards. Eliminates the 2× memory peak from sequential merging.
 - `SearchOutcome` no longer implements `Copy` (implements `Zeroize` + `Drop` instead).
 - `GiantStepParams.baby_map` renamed to `baby_maps` and changed to `&[OpenMap]`.
@@ -52,7 +52,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Atomic report-file writes**: `run_search` and `run_example` write to a temp file and `rename` atomically on success, preventing empty/corrupted report files on crash.
 - **Explicit CAS race documentation**: all `compare_exchange` return-value discards in scan, BSGS, and kangaroo are annotated with comments explaining the benign race.
 
-### Changed
+### Removed
+- Apache-2.0 licensing and dual-license references; the project is now MIT-only.
 - **Internal cleanup**: removed dead code paths, abstractions for single-implementation traits, and an unused dependency (`signal-hook`).
   - Dropped `MetricsSink` trait + `TracingMetricsSink` impl + the `search_complete` event now emits directly via `tracing::info!`.
   - Dropped `Checkpoint::read_from` and the required-field macro (the only callers were the parser's own tests; the live code only writes checkpoints).

@@ -40,7 +40,7 @@ categories = [
     "cryptography::cryptocurrencies",
     "no-std",
 ]
-license = "Apache-2.0 OR MIT"
+license = "MIT"
 repository = "https://github.com/RustCrypto/elliptic-curves/tree/master/k256"
 
 [package.metadata.docs.rs]

@@ -3,7 +3,7 @@
   <p align="center">High-speed parallel ECDSA private key recovery for secp256k1 using a single-signature affine relation attack.</p>
   <p align="center">
     <a href="#installation"><img src="https://img.shields.io/badge/rust-1.75%20%7C%20stable-orange?logo=rust" alt="Rust"></a>
-    <a href="LICENSE-MIT"><img src="https://img.shields.io/badge/license-MIT%2FApache--2.0-green" alt="License"></a>
+    <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="License"></a>
     <a href="https://github.com/sachncs/nonce-cracker/actions"><img src="https://img.shields.io/github/actions/workflow/status/sachncs/nonce-cracker/ci.yml?branch=master" alt="CI"></a>
     <a href="https://crates.io/crates/nonce-cracker"><img src="https://img.shields.io/crates/v/nonce-cracker" alt="crates.io"></a>
     <a href="https://docs.rs/nonce-cracker"><img src="https://img.shields.io/docsrs/nonce-cracker" alt="docs.rs"></a>
@@ -45,7 +45,7 @@ where `alpha = r^-1 * s` and `beta = r^-1 * z`. The tool precomputes these affin
 - **Configuration management** via environment variables
 - **Performance metrics** collection and reporting
 - **Docker support** with multi-stage builds
-- **CI/CD pipeline** with GitHub Actions (build, test, security audit)
+- **CI pipeline** with formatting, linting, cross-platform tests, and dependency checks
 - **Dependency security** auditing with `cargo-deny`
 
 ---
@@ -252,7 +252,6 @@ The repository is organized around a single binary crate with a streamlined, pro
 - `examples/generate.rs` — Test data generator.
 - `examples/bench_bsgs.rs` — End-to-end BSGS performance benchmark for large ranges (2^32 to 2^52).
 - `docs/` — Architecture documentation and deployment guides.
-- `fuzz/` — `cargo-fuzz` harnesses for parsing and OpenMap.
 - `patches/k256/` — Local fork of `k256` v0.13 with `projective_x` / `projective_z` accessors for the kangaroo hot-path optimization.
 
 Data flow is intentionally linear:
@@ -322,8 +321,6 @@ nonce-cracker/
 │   └── integration.rs   # End-to-end CLI tests
 ├── benches/
 │   └── search.rs        # Criterion benchmarks
-├── fuzz/
-│   └── fuzz_targets/    # cargo-fuzz / libfuzzer harnesses
 ├── patches/
 │   └── k256/            # Local k256 fork with projective accessor patch
 ├── examples/
@@ -335,9 +332,8 @@ nonce-cracker/
 │   ├── DEPLOYMENT.md                  # Deployment guide
 │   └── faq.md                         # Frequently asked questions
 ├── .github/
-│   ├── workflows/ci.yml              # CI/CD pipeline
+│   ├── workflows/ci.yml              # CI workflow
 │   ├── dependabot.yml                # Dependency auto-updates
-│   ├── FUNDING.yml                   # Sponsorship links
 │   ├── PULL_REQUEST_TEMPLATE.md      # PR template
 │   └── ISSUE_TEMPLATE/
 │       ├── bug_report.md             # Bug report template
@@ -350,8 +346,7 @@ nonce-cracker/
 ├── Makefile                          # Convenience commands
 ├── setup.sh                          # Quick setup script
 ├── cleanup.sh                        # Build artifact cleanup
-├── LICENSE-MIT
-├── LICENSE-APACHE
+├── LICENSE
 ├── README.md
 ├── CONTRIBUTING.md
 ├── CODE_OF_CONDUCT.md
@@ -554,22 +549,6 @@ cargo bench
 cargo run --example bench_bsgs --release -- 48
 ```
 
-### Fuzzing
-
-```bash
-# Install cargo-fuzz
-cargo install cargo-fuzz
-
-# Run a fuzz target (e.g., parse_scalar)
-cargo fuzz run parse_scalar -- -max_total_time=60
-```
-
-Targets:
-- `parse_scalar`: Hex/decimal string parsing
-- `parse_pubkey`: Public key SEC1 decoding
-- `parse_int`: Signed integer parsing
-- `openmap`: Insert/lookup round-trips
-
 Benchmarks cover:
 - `scalar_invert`: Scalar modular inversion
 - `derive_affine_constants`: Alpha/beta constant computation
@@ -595,7 +574,6 @@ Benchmarks cover:
 | Hashing | [rustc-hash](https://crates.io/crates/rustc-hash) (`FxHash`) |
 | Testing | built-in + [assert_cmd](https://crates.io/crates/assert_cmd) + [proptest](https://crates.io/crates/proptest) |
 | Benchmarks | [criterion](https://crates.io/crates/criterion) |
-| Fuzzing | [cargo-fuzz](https://github.com/rust-fuzz/cargo-fuzz) / libFuzzer |
 | Security audit | [cargo-deny](https://crates.io/crates/cargo-deny) |
 | Containerization | Docker (multi-stage) |
 
@@ -626,12 +604,7 @@ See [SECURITY.md](SECURITY.md) for vulnerability reporting and supported version
 
 ## License
 
-Licensed under either of:
-
-- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
-- MIT license ([LICENSE-MIT](LICENSE-MIT))
-
-at your option.
+Licensed under the [MIT License](LICENSE).
 
 ## Disclaimer
 

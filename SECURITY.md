@@ -103,5 +103,4 @@ Security improvements in this release:
 
 ## License
 
-Security-related code is licensed under the same terms as the project:
-- MIT OR Apache-2.0
+Security-related code is licensed under the MIT License.
