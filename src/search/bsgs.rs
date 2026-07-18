@@ -47,11 +47,15 @@ pub fn search(
     shutdown: &ShutdownToken,
     scan: &ScanParams,
 ) -> Result<Option<i128>> {
-    debug_assert_eq!(affine_key_prefix(&AffinePoint::IDENTITY), IDENTITY_KEY,
-        "IDENTITY_KEY sentinel must match AffinePoint::IDENTITY encoding");
+    debug_assert_eq!(
+        affine_key_prefix(&AffinePoint::IDENTITY),
+        IDENTITY_KEY,
+        "IDENTITY_KEY sentinel must match AffinePoint::IDENTITY encoding"
+    );
 
     let target_affine: AffinePoint = *scan.target.as_affine();
-    let d0_scalar = crate::crypto::derive_private_key(scan.start.unsigned_abs(), scan.alpha, scan.beta);
+    let d0_scalar =
+        crate::crypto::derive_private_key(scan.start.unsigned_abs(), scan.alpha, scan.beta);
     let d0_point = ProjectivePoint::GENERATOR * d0_scalar;
 
     if d0_point == target_affine {
@@ -78,8 +82,8 @@ pub fn search(
     // Expected peak memory: per-thread OpenMaps at 0.7 load factor.
     // Entry size is ~24 bytes.  Cap at ~8 GB to prevent OOM on typical machines.
     const BSGS_MEMORY_LIMIT_BYTES: u64 = 8 * 1024 * 1024 * 1024;
-    let per_thread_cap = ((m_u64 as f64 / thread_count as f64 / 0.7).ceil() as u64)
-        .next_power_of_two();
+    let per_thread_cap =
+        ((m_u64 as f64 / thread_count as f64 / 0.7).ceil() as u64).next_power_of_two();
     let expected_bytes = thread_count as u64 * per_thread_cap * OPENMAP_ENTRY_BYTES;
     if expected_bytes > BSGS_MEMORY_LIMIT_BYTES {
         return Err(EngineError::BsgsMemoryLimit.into());
@@ -144,7 +148,8 @@ fn run_giant_steps(p: &GiantStepParams<'_>) -> Option<u64> {
                 for idx in 0..(batch_end - i) {
                     if current == ProjectivePoint::IDENTITY {
                         if let Some(j) = lookup_in_shards(p.baby_maps, IDENTITY_KEY) {
-                            let k = (u128::from(i) + u128::from(idx)) * u128::from(p.m) + u128::from(j);
+                            let k =
+                                (u128::from(i) + u128::from(idx)) * u128::from(p.m) + u128::from(j);
                             if k < p.total {
                                 let _ = result.compare_exchange(
                                     u64::MAX,
@@ -171,7 +176,8 @@ fn run_giant_steps(p: &GiantStepParams<'_>) -> Option<u64> {
                         let idx = indices[affine_idx];
                         let key = affine_key_prefix(affine);
                         if let Some(j) = lookup_in_shards(p.baby_maps, key) {
-                            let k = (u128::from(i) + u128::from(idx)) * u128::from(p.m) + u128::from(j);
+                            let k =
+                                (u128::from(i) + u128::from(idx)) * u128::from(p.m) + u128::from(j);
                             if k < p.total {
                                 let _ = result.compare_exchange(
                                     u64::MAX,
@@ -280,8 +286,9 @@ fn build_baby_steps(
 
                 for (idx, affine) in affines.iter().enumerate() {
                     let key = affine_key_prefix(affine);
-                    let inserted = u64::try_from(j + u128::try_from(idx).expect("idx fits in u128"))
-                        .expect("inserted fits in u64");
+                    let inserted =
+                        u64::try_from(j + u128::try_from(idx).expect("idx fits in u128"))
+                            .expect("inserted fits in u64");
                     map.insert(key, inserted);
                 }
 

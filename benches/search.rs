@@ -12,7 +12,7 @@
 //! Results are written to `target/criterion/` and can be viewed by opening
 //! `target/criterion/report/index.html`.
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use k256::{
     elliptic_curve::{sec1::ToEncodedPoint, PrimeField},
     ProjectivePoint, PublicKey, Scalar,
@@ -22,6 +22,7 @@ use nonce_cracker::search::KangarooParams;
 use nonce_cracker::{
     derive_affine_constants, derive_private_key, Config, SearchEngine, ShutdownToken, Signature,
 };
+use std::hint::black_box;
 
 fn bench_scalar_invert(c: &mut Criterion) {
     let scalar = Scalar::from(123_456_789_u64);

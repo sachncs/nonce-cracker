@@ -290,8 +290,7 @@ mod tests {
         let (sig, pk) = fixture();
         let out = temp_log("nonce_found");
         let spec = SearchSpec::new(0, 0x2000, 1).unwrap();
-        let engine = SearchEngine::new(&config, None, shutdown.clone())
-            .unwrap();
+        let engine = SearchEngine::new(&config, None, shutdown.clone()).unwrap();
         let outcome = engine.search(&spec, &sig, &pk).unwrap();
         assert_eq!(outcome.nonce, Some(0x1234));
 
@@ -315,8 +314,7 @@ mod tests {
         let (sig, pk) = fixture();
         let out = temp_log("nonce_miss");
         let spec = SearchSpec::new(0, 0, 1).unwrap();
-        let engine = SearchEngine::new(&config, None, shutdown.clone())
-        .unwrap();
+        let engine = SearchEngine::new(&config, None, shutdown.clone()).unwrap();
         let outcome = engine.search(&spec, &sig, &pk).unwrap();
         assert_eq!(outcome.nonce, None);
 

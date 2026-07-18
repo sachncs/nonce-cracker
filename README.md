@@ -246,7 +246,6 @@ The repository is organized around a single binary crate with a streamlined, pro
 - `src/logging.rs` — Structured logging backend using `tracing` with compact output format.
 - `src/config.rs` — Centralized configuration management with environment variable support.
 - `src/checkpoint.rs` — Minimal checkpoint/resume scaffolding for long searches.
-- `src/metrics.rs` — Search performance metrics collection.
 - `tests/integration.rs` — End-to-end CLI tests including logging behavior and signed-range handling.
 - `benches/search.rs` — Criterion benchmarks for core cryptographic operations.
 - `examples/demo.rs` — Usage demonstration.
@@ -310,8 +309,7 @@ nonce-cracker/
 │   ├── error.rs         # Structured error types
 │   ├── fixtures.rs      # Test fixtures
 │   ├── logging.rs       # Structured logging backend
-│   ├── metrics.rs       # Performance metrics collection
-│   ├── context.rs       # Shutdown token and app context
+│   ├── context.rs       # Shutdown token
 │   └── search/
 │       ├── mod.rs       # SearchEngine and algorithm dispatch
 │       ├── parallel.rs  # Parallel scan for small ranges
@@ -593,7 +591,7 @@ Benchmarks cover:
 | Logging | [tracing](https://crates.io/crates/tracing) + `tracing-subscriber` |
 | Errors | [thiserror](https://crates.io/crates/thiserror) |
 | Zeroization | [zeroize](https://crates.io/crates/zeroize) |
-| Signal handling | [ctrlc](https://crates.io/crates/ctrlc), [signal-hook](https://crates.io/crates/signal-hook) |
+| Signal handling | [ctrlc](https://crates.io/crates/ctrlc) |
 | Hashing | [rustc-hash](https://crates.io/crates/rustc-hash) (`FxHash`) |
 | Testing | built-in + [assert_cmd](https://crates.io/crates/assert_cmd) + [proptest](https://crates.io/crates/proptest) |
 | Benchmarks | [criterion](https://crates.io/crates/criterion) |

@@ -46,7 +46,6 @@ fn test_bsgs_medium_range() {
     assert_eq!(found, Some(5));
 }
 
-
 #[test]
 fn test_engine_debug() {
     let engine = make_engine(2);
@@ -69,12 +68,7 @@ fn test_thread_cap_warning() {
         checkpoint_dir: std::env::temp_dir().join("checkpoints"),
         version: "test",
     };
-    let engine = SearchEngine::new(
-        &config,
-        Some(100),
-        ShutdownToken::new(),
-    )
-    .unwrap();
+    let engine = SearchEngine::new(&config, Some(100), ShutdownToken::new()).unwrap();
     assert_eq!(engine.thread_count, 2);
 }
 
@@ -198,8 +192,7 @@ fn test_parallel_scan_shutdown() {
         checkpoint_dir: std::env::temp_dir().join("checkpoints"),
         version: "test",
     };
-    let engine =
-        SearchEngine::new(&config, Some(4), shutdown ).unwrap();
+    let engine = SearchEngine::new(&config, Some(4), shutdown).unwrap();
     let scan = ScanParams {
         target: pk,
         start: 0,
@@ -226,8 +219,7 @@ fn test_giant_steps_shutdown() {
         checkpoint_dir: std::env::temp_dir().join("checkpoints"),
         version: "test",
     };
-    let engine =
-        SearchEngine::new(&config, Some(4), shutdown ).unwrap();
+    let engine = SearchEngine::new(&config, Some(4), shutdown).unwrap();
     let scan = ScanParams {
         target: pk,
         start: 0,
@@ -308,7 +300,7 @@ fn test_kangaroo_shutdown() {
         .unwrap();
     let shutdown = ShutdownToken::new();
     shutdown.signal();
-    let engine = SearchEngine::with_params(pool, 4, shutdown );
+    let engine = SearchEngine::with_params(pool, 4, shutdown);
     let kangaroo_params = crate::search::params::KangarooParams {
         g: ProjectivePoint::GENERATOR,
         h: pk.into(),

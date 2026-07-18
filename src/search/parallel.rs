@@ -31,8 +31,8 @@ pub fn scan(
     let found = Arc::new(AtomicU64::new(NOT_FOUND));
 
     // Precompute the base point for start to avoid per-chunk scalar mults.
-    let base_point =
-        ProjectivePoint::GENERATOR * derive_private_key(scan.start.unsigned_abs(), scan.alpha, scan.beta);
+    let base_point = ProjectivePoint::GENERATOR
+        * derive_private_key(scan.start.unsigned_abs(), scan.alpha, scan.beta);
 
     pool.install(|| {
         (0..thread_count).into_par_iter().for_each(|thread_id| {
@@ -98,7 +98,11 @@ pub fn scan(
         let index = val as i128;
         Some(
             scan.start
-                .checked_add(index.checked_mul(scan.step).expect("index*step overflow despite SearchSpec validation"))
+                .checked_add(
+                    index
+                        .checked_mul(scan.step)
+                        .expect("index*step overflow despite SearchSpec validation"),
+                )
                 .expect("start+index*step overflow despite SearchSpec validation"),
         )
     }

@@ -71,7 +71,8 @@ impl Config {
     pub fn from_env() -> Result<Self, ConfigError> {
         let max_threads = parse_env_usize("NONCE_CRACKER_MAX_THREADS", MAX_THREADS_DEFAULT)?;
         let log_dir = parse_env_path("NONCE_CRACKER_LOG_DIR", LOG_DIR_DEFAULT)?;
-        let checkpoint_dir = parse_env_path("NONCE_CRACKER_CHECKPOINT_DIR", CHECKPOINT_DIR_DEFAULT)?;
+        let checkpoint_dir =
+            parse_env_path("NONCE_CRACKER_CHECKPOINT_DIR", CHECKPOINT_DIR_DEFAULT)?;
 
         if max_threads == 0 {
             return Err(ConfigError::MaxThreadsZero);

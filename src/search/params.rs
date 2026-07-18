@@ -95,18 +95,27 @@ impl KangarooParams {
         max_iterations: Option<u64>,
     ) -> crate::error::Result<Self> {
         if d == 0 || d > 264 {
-            return Err(crate::error::EngineError::KangarooParamsInvalid(format!("d={d} out of range [1, 264]")).into());
+            return Err(crate::error::EngineError::KangarooParamsInvalid(format!(
+                "d={d} out of range [1, 264]"
+            ))
+            .into());
         }
         let max_iterations = max_iterations.unwrap_or_else(|| {
             let total_f64 = total as f64;
             (10.0 * total_f64.sqrt()).max(1.0) as u64
         });
         if max_iterations == 0 {
-            return Err(crate::error::EngineError::KangarooParamsInvalid("max_iterations must be > 0".into()).into());
+            return Err(crate::error::EngineError::KangarooParamsInvalid(
+                "max_iterations must be > 0".into(),
+            )
+            .into());
         }
         let n = (total - 1) as i128;
         let _ = start
-            .checked_add(n.checked_mul(step).ok_or(crate::error::RangeError::RangeOverflow)?)
+            .checked_add(
+                n.checked_mul(step)
+                    .ok_or(crate::error::RangeError::RangeOverflow)?,
+            )
             .ok_or(crate::error::RangeError::RangeOverflow)?;
         Ok(Self {
             g,

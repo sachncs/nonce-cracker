@@ -21,9 +21,7 @@ use crate::{
     domain::{SearchOutcome, SearchSpec, Signature},
     error::{EngineError, Result},
 };
-use k256::{
-    elliptic_curve::sec1::ToEncodedPoint, AffinePoint, ProjectivePoint, PublicKey, Scalar,
-};
+use k256::{elliptic_curve::sec1::ToEncodedPoint, AffinePoint, ProjectivePoint, PublicKey, Scalar};
 use rayon::ThreadPool;
 use std::time::Instant;
 
@@ -66,11 +64,7 @@ impl SearchEngine {
     /// # Errors
     ///
     /// Returns an error if the Rayon thread pool cannot be built.
-    pub fn new(
-        config: &Config,
-        threads: Option<usize>,
-        shutdown: ShutdownToken,
-    ) -> Result<Self> {
+    pub fn new(config: &Config, threads: Option<usize>, shutdown: ShutdownToken) -> Result<Self> {
         let max_threads = config.max_threads;
         let thread_count = match threads {
             Some(0) => return Err(EngineError::ThreadCountZero.into()),
@@ -167,9 +161,7 @@ impl SearchEngine {
                 r_hex: scalar_hex(&sig.r),
                 s_hex: scalar_hex(&sig.s),
                 z_hex: scalar_hex(&sig.z),
-                pubkey_hex: hex::encode(
-                    target.as_affine().to_encoded_point(true).as_bytes(),
-                ),
+                pubkey_hex: hex::encode(target.as_affine().to_encoded_point(true).as_bytes()),
                 last_index: None,
             };
             match crate::checkpoint::write(dir, &cp) {
@@ -187,12 +179,7 @@ impl SearchEngine {
             // For medium ranges try BSGS first; fall back to kangaroo if the
             // baby-step table would exceed the memory guard.
             let bsgs_result = if total <= KANGAROO_THRESHOLD {
-                bsgs::search(
-                    &self.pool,
-                    self.thread_count,
-                    &self.shutdown,
-                    &scan,
-                )
+                bsgs::search(&self.pool, self.thread_count, &self.shutdown, &scan)
             } else {
                 Err(EngineError::BsgsMemoryLimit.into())
             };
@@ -202,8 +189,7 @@ impl SearchEngine {
                     tracing::warn!("BSGS memory limit exceeded; falling back to kangaroo");
                     // Auto-tune distinguished-point density:
                     // target ~1000 total DPs to balance memory and collision probability.
-                    let d = ((self.thread_count as f64).log2()
-                        + (total as f64).sqrt().log2()
+                    let d = ((self.thread_count as f64).log2() + (total as f64).sqrt().log2()
                         - 10.0)
                         .round()
                         .clamp(8.0, 24.0) as u32;
@@ -256,11 +242,7 @@ impl SearchEngine {
 #[cfg(test)]
 impl SearchEngine {
     /// Test-only constructor.
-    pub fn with_params(
-        pool: ThreadPool,
-        thread_count: usize,
-        shutdown: ShutdownToken,
-    ) -> Self {
+    pub fn with_params(pool: ThreadPool, thread_count: usize, shutdown: ShutdownToken) -> Self {
         Self {
             pool,
             thread_count,
@@ -271,12 +253,7 @@ impl SearchEngine {
 
     /// Test-only access to the BSGS algorithm.
     pub fn bsgs(&self, scan: &ScanParams) -> Result<Option<i128>> {
-        bsgs::search(
-            &self.pool,
-            self.thread_count,
-            &self.shutdown,
-            scan,
-        )
+        bsgs::search(&self.pool, self.thread_count, &self.shutdown, scan)
     }
 
     /// Test-only access to the parallel scan algorithm.

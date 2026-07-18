@@ -52,6 +52,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Atomic report-file writes**: `run_search` and `run_example` write to a temp file and `rename` atomically on success, preventing empty/corrupted report files on crash.
 - **Explicit CAS race documentation**: all `compare_exchange` return-value discards in scan, BSGS, and kangaroo are annotated with comments explaining the benign race.
 
+### Changed
+- **Internal cleanup**: removed dead code paths, abstractions for single-implementation traits, and an unused dependency (`signal-hook`).
+  - Dropped `MetricsSink` trait + `TracingMetricsSink` impl + the `search_complete` event now emits directly via `tracing::info!`.
+  - Dropped `Checkpoint::read_from` and the required-field macro (the only callers were the parser's own tests; the live code only writes checkpoints).
+  - Dropped `KangarooParams::validate()` (duplicate of `new()`'s validation).
+  - `derive_private_key(nonce: u128, …)` — the `i128` signature only existed to support two unit tests.
+  - Trimmed `OpenMap` public surface (kept `with_capacity`, `insert`, `get`, `len`, `is_empty`); auto-grew proptest dropped.
+  - Dropped `LogWriter` sink fallback in `logging.rs` (file clone failures now bubble up instead of being silently swallowed).
+  - Dropped `AppContext` wrapper in `context.rs` — `run_search` / `run_example` take `(&Config, &ShutdownToken)` directly.
+  - Removed `signal-hook` from `[dependencies]` (was never imported; `ctrlc` already covers signal handling).
+
 ## [0.6.0] - 2026-05-15
 
 ### Added

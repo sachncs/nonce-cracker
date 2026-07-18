@@ -127,6 +127,11 @@ impl OpenMap {
     pub fn len(&self) -> usize {
         self.len
     }
+
+    /// Return whether the map contains no entries.
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
 }
 
 #[cfg(test)]

@@ -43,7 +43,11 @@ pub fn search(
 ) -> Result<Option<i128>> {
     // Degenerate case: alpha == 0 means all candidates have the same discrete log.
     if params.alpha == Scalar::ZERO {
-        let d0_scalar = crate::crypto::derive_private_key(params.start.unsigned_abs(), params.alpha, params.beta);
+        let d0_scalar = crate::crypto::derive_private_key(
+            params.start.unsigned_abs(),
+            params.alpha,
+            params.beta,
+        );
         let d0_point = ProjectivePoint::GENERATOR * d0_scalar;
         if d0_point == params.h {
             return Ok(Some(params.start));
@@ -109,7 +113,11 @@ pub fn search(
             // Each thread runs one tame and one wild walk
             let mut tame_dist = 0u64;
             let mut tame = ProjectivePoint::GENERATOR
-                * crate::crypto::derive_private_key(params.start.unsigned_abs(), params.alpha, params.beta);
+                * crate::crypto::derive_private_key(
+                    params.start.unsigned_abs(),
+                    params.alpha,
+                    params.beta,
+                );
 
             let mut wild_dist = 0u64;
             let mut wild = params.h;
@@ -142,9 +150,7 @@ pub fn search(
                 if is_distinguished(&tame, walk.d) {
                     let tame_key = crate::crypto::affine_key(&tame.to_affine());
                     {
-                        let mut guard = table[tid]
-                            .write()
-                            .unwrap_or_else(|e| e.into_inner());
+                        let mut guard = table[tid].write().unwrap_or_else(|e| e.into_inner());
                         guard.insert(tame_key, tame_dist);
                     }
                     let c = dp_count.fetch_add(1, Ordering::Relaxed);
@@ -178,7 +184,9 @@ pub fn search(
                                 continue;
                             };
                             let Some(candidate) = params.start.checked_add(step_delta) else {
-                                tracing::warn!("kangaroo start+step_delta overflow; skipping collision");
+                                tracing::warn!(
+                                    "kangaroo start+step_delta overflow; skipping collision"
+                                );
                                 continue;
                             };
                             // Verify candidate is in range
@@ -186,7 +194,9 @@ pub fn search(
                             if idx >= 0 && (idx as u128) < params.total {
                                 let verify_point = ProjectivePoint::GENERATOR
                                     * crate::crypto::derive_private_key(
-                                        candidate.unsigned_abs(), params.alpha, params.beta,
+                                        candidate.unsigned_abs(),
+                                        params.alpha,
+                                        params.beta,
                                     );
                                 if verify_point == params.h {
                                     if result

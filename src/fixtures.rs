@@ -1,9 +1,6 @@
 //! Shared test fixtures and helpers used by unit tests across the crate.
 
-use crate::{
-    config::Config, context::ShutdownToken, domain::Signature,
-    search::SearchEngine,
-};
+use crate::{config::Config, context::ShutdownToken, domain::Signature, search::SearchEngine};
 use k256::{
     elliptic_curve::{sec1::ToEncodedPoint, PrimeField},
     ProjectivePoint, PublicKey, Scalar,
@@ -74,10 +71,5 @@ pub fn make_engine(threads: usize) -> SearchEngine {
         checkpoint_dir: std::env::temp_dir().join("checkpoints"),
         version: "test",
     };
-    SearchEngine::new(
-        &config,
-        Some(threads),
-        ShutdownToken::new(),
-    )
-    .unwrap()
+    SearchEngine::new(&config, Some(threads), ShutdownToken::new()).unwrap()
 }

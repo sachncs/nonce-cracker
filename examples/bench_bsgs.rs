@@ -22,7 +22,7 @@ use nonce_cracker::{
     derive_affine_constants, derive_private_key, verify_ecdsa_signature, Config, SearchEngine,
     SearchSpec, ShutdownToken, Signature,
 };
-use rand::Rng;
+use rand::RngExt;
 
 fn main() {
     let bits: u32 = std::env::args()
@@ -38,12 +38,10 @@ fn main() {
     let end = 1u128 << bits;
     println!("BSGS benchmark: searching nonce in [0, 2^{bits})  ({end} candidates)");
 
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
 
-    // Pick a random nonce in [0, end).
-    let nonce = rng.gen_range(0..end);
-    // Pick a random private key.
-    let d_bytes: [u8; 32] = rng.gen();
+    let nonce: u64 = rng.random_range(0..(end as u64));
+    let d_bytes: [u8; 32] = rng.random();
     let d = Scalar::from_repr(d_bytes.into()).unwrap_or_else(|| Scalar::from(1u64));
 
     // Compute public key.
@@ -71,7 +69,7 @@ fn main() {
     verify_ecdsa_signature(&pk, &sig.r, &sig.s, &sig.z).unwrap();
 
     let (alpha, beta) = derive_affine_constants(&sig).unwrap();
-    let expected_d = derive_private_key(nonce as i128, alpha, beta);
+    let expected_d = derive_private_key(nonce as u128, alpha, beta);
     assert_eq!(expected_d, d, "derived private key mismatch");
 
     println!("nonce = {nonce}  (0x{nonce:x})");

@@ -6,12 +6,12 @@
 
 use crate::domain::Signature;
 use crate::error::{CryptoError, RangeError, Result};
-use zeroize::Zeroize;
 use k256::{
     ecdsa::{signature::hazmat::PrehashVerifier, Signature as EcdsaSignature, VerifyingKey},
     elliptic_curve::PrimeField,
     AffinePoint, PublicKey, Scalar,
 };
+use zeroize::Zeroize;
 
 /// Derive the affine constants `alpha` and `beta` from a single ECDSA
 /// signature such that the private key can be expressed as:
@@ -236,7 +236,11 @@ pub fn affine_key_prefix(affine: &AffinePoint) -> u128 {
     use k256::elliptic_curve::point::AffineCoordinates;
     let x = affine.x();
     let x_bytes: &[u8] = x.as_ref();
-    let prefix = if affine.y_is_odd().into() { 0x03u8 } else { 0x02u8 };
+    let prefix = if affine.y_is_odd().into() {
+        0x03u8
+    } else {
+        0x02u8
+    };
     let mut buf = [0u8; 16];
     buf[0] = prefix;
     buf[1..16].copy_from_slice(&x_bytes[..15]);
@@ -403,9 +407,12 @@ mod tests {
 
     #[test]
     fn test_user_provided_values() {
-        let r = parse_scalar("0xae3a7f6f10f9dd783818bb9ea7d9e1f3282d2cd73c7e71acef7c7bdf19f83be1").unwrap();
-        let s = parse_scalar("0xd4e0c39ac4a4cfb655cf51af2b8e4a0e80ac7004515ea2249b9e2a2c7e5737e0").unwrap();
-        let z = parse_scalar("0xd57586b5c9c6e51ff7689c7d75768106d4f3bba71bd850c3e30a91d46d386d8d").unwrap();
+        let r = parse_scalar("0xae3a7f6f10f9dd783818bb9ea7d9e1f3282d2cd73c7e71acef7c7bdf19f83be1")
+            .unwrap();
+        let s = parse_scalar("0xd4e0c39ac4a4cfb655cf51af2b8e4a0e80ac7004515ea2249b9e2a2c7e5737e0")
+            .unwrap();
+        let z = parse_scalar("0xd57586b5c9c6e51ff7689c7d75768106d4f3bba71bd850c3e30a91d46d386d8d")
+            .unwrap();
         let sig = crate::domain::Signature::new(r, s, z);
         let (alpha, beta) = derive_affine_constants(&sig).unwrap();
 
