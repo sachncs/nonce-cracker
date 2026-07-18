@@ -7,6 +7,10 @@ on:
   pull_request:
     branches: [master, main]
 
+# Default to read-only; opt each job into broader scopes where it needs them.
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
@@ -66,13 +70,16 @@ jobs:
   security-audit:
     name: Security Audit
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v7
 
-      - name: Run cargo audit
-        uses: rustsec/audit-check@v2
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install cargo-audit
+        run: cargo install --locked cargo-audit --version "^0.21"
+
+      - name: Run cargo-audit
+        run: cargo audit --deny warnings
 
       - name: Install cargo-deny
         run: cargo install --locked cargo-deny
