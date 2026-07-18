@@ -5,7 +5,7 @@
 
 use crate::{context::ShutdownToken, error::Result, search::params::KangarooParams};
 use k256::{ProjectivePoint, Scalar};
-use rand::{Rng, SeedableRng};
+use rand::{RngExt as _, SeedableRng};
 use rayon::prelude::*;
 use rustc_hash::FxHashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -77,7 +77,7 @@ pub fn search(
     let mut rng = rand::rngs::StdRng::from_seed(seed);
     let jump_sizes: Vec<JumpSize> = (0..JUMP_COUNT)
         .map(|_| JumpSize {
-            distance: (avg_jump * 2.0 * rng.gen::<f64>()).max(1.0) as u64,
+            distance: (avg_jump * 2.0 * rng.random::<f64>()).max(1.0) as u64,
         })
         .collect();
 
