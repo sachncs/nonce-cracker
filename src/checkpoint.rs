@@ -7,7 +7,7 @@
 
 use std::{
     fs::{self, File},
-    io::{self, BufRead, Write},
+    io::{self, Write},
     path::{Path, PathBuf},
 };
 
@@ -36,9 +36,7 @@ pub struct Checkpoint {
 
 impl Checkpoint {
     /// Serialize the checkpoint to a writer in key=value format.
-    pub fn write_to(&self,
-        writer: &mut dyn Write,
-    ) -> io::Result<()> {
+    pub fn write_to(&self, writer: &mut dyn Write) -> io::Result<()> {
         writeln!(writer, "algorithm={}", self.algorithm)?;
         writeln!(writer, "start={}", self.start)?;
         writeln!(writer, "step={}", self.step)?;
@@ -52,95 +50,6 @@ impl Checkpoint {
         }
         Ok(())
     }
-
-    /// Deserialize a checkpoint from a reader.
-    ///
-    /// Returns an error if any required field is missing, a line is malformed,
-    /// or an unknown key is encountered.
-    pub fn read_from(reader: &mut dyn BufRead) -> io::Result<Self> {
-        let mut algorithm: Option<String> = None;
-        let mut start: Option<i128> = None;
-        let mut step: Option<i128> = None;
-        let mut total: Option<u128> = None;
-        let mut r_hex: Option<String> = None;
-        let mut s_hex: Option<String> = None;
-        let mut z_hex: Option<String> = None;
-        let mut pubkey_hex: Option<String> = None;
-        let mut last_index: Option<u128> = None;
-
-        for line in reader.lines() {
-            let line = line?;
-            if line.is_empty() {
-                continue;
-            }
-            let Some((key, value)) = line.split_once('=') else {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("malformed checkpoint line (missing '='): {line}")
-                ));
-            };
-            match key {
-                "algorithm" => algorithm = Some(value.to_string()),
-                "start" => start = Some(value.parse().map_err(|e| io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("invalid start: {e}")
-                ))?),
-                "step" => step = Some(value.parse().map_err(|e| io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("invalid step: {e}")
-                ))?),
-                "total" => total = Some(value.parse().map_err(|e| io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("invalid total: {e}")
-                ))?),
-                "r" => r_hex = Some(value.to_string()),
-                "s" => s_hex = Some(value.to_string()),
-                "z" => z_hex = Some(value.to_string()),
-                "pubkey" => pubkey_hex = Some(value.to_string()),
-                "last_index" => last_index = Some(value.parse().map_err(|e| io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("invalid last_index: {e}")
-                ))?),
-                other => return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("unknown checkpoint key: {other}")
-                )),
-            }
-        }
-
-        macro_rules! required {
-            ($field:expr, $name:literal) => {
-                $field.ok_or_else(|| io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("missing required checkpoint field: {}", $name)
-                ))?
-            };
-        }
-
-        Ok(Checkpoint {
-            algorithm: required!(algorithm, "algorithm"),
-            start: required!(start, "start"),
-            step: required!(step, "step"),
-            total: required!(total, "total"),
-            r_hex: required!(r_hex, "r"),
-            s_hex: required!(s_hex, "s"),
-            z_hex: required!(z_hex, "z"),
-            pubkey_hex: required!(pubkey_hex, "pubkey"),
-            last_index,
-        })
-    }
-
-    /// Return the default file name for this checkpoint.
-    pub fn file_name(&self) -> String {
-        format!(
-            "checkpoint_{}_{}.txt",
-            self.algorithm,
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs()
-        )
-    }
 }
 
 /// Write a checkpoint file to `dir`.  Returns the path of the written file.
@@ -148,7 +57,11 @@ pub fn write(dir: &Path, checkpoint: &Checkpoint) -> io::Result<PathBuf> {
     if !dir.exists() {
         fs::create_dir_all(dir)?;
     }
-    let path = dir.join(checkpoint.file_name());
+    let path = dir.join(format!(
+        "checkpoint_{}_{}.txt",
+        checkpoint.algorithm,
+        std::process::id()
+    ));
     let mut file = File::create(&path)?;
     checkpoint.write_to(&mut file)?;
     file.flush()?;
@@ -186,42 +99,10 @@ mod tests {
 
         let mut buf = Vec::new();
         cp.write_to(&mut buf).unwrap();
-        let mut reader = io::BufReader::new(&buf[..]);
-        let parsed = Checkpoint::read_from(&mut reader).unwrap();
-
-        assert_eq!(parsed.algorithm, cp.algorithm);
-        assert_eq!(parsed.start, cp.start);
-        assert_eq!(parsed.step, cp.step);
-        assert_eq!(parsed.total, cp.total);
-        assert_eq!(parsed.r_hex, cp.r_hex);
-        assert_eq!(parsed.s_hex, cp.s_hex);
-        assert_eq!(parsed.z_hex, cp.z_hex);
-        assert_eq!(parsed.pubkey_hex, cp.pubkey_hex);
-        assert_eq!(parsed.last_index, cp.last_index);
-    }
-
-    #[test]
-    fn read_rejects_missing_field() {
-        let data = b"algorithm=scan\nstart=0\nstep=1\n";
-        let mut reader = io::BufReader::new(&data[..]);
-        let err = Checkpoint::read_from(&mut reader).unwrap_err();
-        assert!(err.to_string().contains("missing required"));
-    }
-
-    #[test]
-    fn read_rejects_malformed_line() {
-        let data = b"algorithm=scan\nstart=0\nstep=1\ntotal=10\nr=0x01\ns=0x02\nz=0x03\npubkey=0x04\nbadline\n";
-        let mut reader = io::BufReader::new(&data[..]);
-        let err = Checkpoint::read_from(&mut reader).unwrap_err();
-        assert!(err.to_string().contains("malformed"));
-    }
-
-    #[test]
-    fn read_rejects_unknown_key() {
-        let data = b"algorithm=scan\nstart=0\nstep=1\ntotal=10\nr=0x01\ns=0x02\nz=0x03\npubkey=0x04\nunknown_key=val\n";
-        let mut reader = io::BufReader::new(&data[..]);
-        let err = Checkpoint::read_from(&mut reader).unwrap_err();
-        assert!(err.to_string().contains("unknown checkpoint key"));
+        let body = String::from_utf8(buf).unwrap();
+        assert!(body.contains("algorithm=bsgs"));
+        assert!(body.contains("start=-100"));
+        assert!(body.contains("last_index=42000"));
     }
 
     #[test]
