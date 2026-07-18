@@ -5,10 +5,8 @@ use crate::{
     crypto::derive_affine_constants,
     domain::{SearchSpec, Signature},
     fixtures::{fixture, fixture_with_nonce, make_engine},
-    metrics::TracingMetricsSink,
 };
 use k256::{elliptic_curve::sec1::ToEncodedPoint, ProjectivePoint, Scalar};
-use std::sync::Arc;
 
 #[test]
 fn test_bsgs_small_range() {
@@ -75,7 +73,6 @@ fn test_thread_cap_warning() {
         &config,
         Some(100),
         ShutdownToken::new(),
-        Arc::new(TracingMetricsSink),
     )
     .unwrap();
     assert_eq!(engine.thread_count, 2);
@@ -202,7 +199,7 @@ fn test_parallel_scan_shutdown() {
         version: "test",
     };
     let engine =
-        SearchEngine::new(&config, Some(4), shutdown, Arc::new(TracingMetricsSink)).unwrap();
+        SearchEngine::new(&config, Some(4), shutdown ).unwrap();
     let scan = ScanParams {
         target: pk,
         start: 0,
@@ -230,7 +227,7 @@ fn test_giant_steps_shutdown() {
         version: "test",
     };
     let engine =
-        SearchEngine::new(&config, Some(4), shutdown, Arc::new(TracingMetricsSink)).unwrap();
+        SearchEngine::new(&config, Some(4), shutdown ).unwrap();
     let scan = ScanParams {
         target: pk,
         start: 0,
@@ -311,7 +308,7 @@ fn test_kangaroo_shutdown() {
         .unwrap();
     let shutdown = ShutdownToken::new();
     shutdown.signal();
-    let engine = SearchEngine::with_params(pool, 4, shutdown, Arc::new(TracingMetricsSink));
+    let engine = SearchEngine::with_params(pool, 4, shutdown );
     let kangaroo_params = crate::search::params::KangarooParams {
         g: ProjectivePoint::GENERATOR,
         h: pk.into(),

@@ -21,9 +21,7 @@ use nonce_cracker::search::openmap::OpenMap;
 use nonce_cracker::search::KangarooParams;
 use nonce_cracker::{
     derive_affine_constants, derive_private_key, Config, SearchEngine, ShutdownToken, Signature,
-    TracingMetricsSink,
 };
-use std::sync::Arc;
 
 fn bench_scalar_invert(c: &mut Criterion) {
     let scalar = Scalar::from(123_456_789_u64);
@@ -141,7 +139,6 @@ fn bench_kangaroo(c: &mut Criterion) {
         },
         Some(4),
         ShutdownToken::new(),
-        Arc::new(TracingMetricsSink),
     )
     .unwrap();
     let (sig, _pk) = fixture();

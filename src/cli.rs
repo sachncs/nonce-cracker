@@ -11,13 +11,12 @@ use k256::{ProjectivePoint, PublicKey, Scalar};
 use nonce_cracker::{
     derive_private_key, logging::emit_summary, parse_int, parse_pubkey, parse_scalar, scalar_hex,
     verify_ecdsa_signature, AppContext, CryptoError, Error, RangeError, Result, SearchEngine,
-    SearchOutcome, SearchSpec, Signature, TracingMetricsSink,
+    SearchOutcome, SearchSpec, Signature,
 };
 use std::{
     fs::File,
     io::{BufWriter, Write},
     path::Path,
-    sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
 use tracing::Level;
@@ -133,12 +132,7 @@ pub fn run_search(ctx: &AppContext, args: &SearchArgs) -> Result<()> {
         parse_int(&args.step)?,
     )?;
 
-    let engine = SearchEngine::new(
-        &ctx.config,
-        args.threads,
-        ctx.shutdown.clone(),
-        Arc::new(TracingMetricsSink),
-    )?;
+    let engine = SearchEngine::new(&ctx.config, args.threads, ctx.shutdown.clone())?;
 
     let out = resolve_path(&ctx.config.log_dir, &args.outfile)?;
     if let Some(parent) = out.parent() {
@@ -183,12 +177,7 @@ pub fn run_example(ctx: &AppContext) -> Result<()> {
     let sig = Signature::new(r, s, z);
     let spec = SearchSpec::new(0, 0x2000, 1)?;
 
-    let engine = SearchEngine::new(
-        &ctx.config,
-        None,
-        ctx.shutdown.clone(),
-        Arc::new(TracingMetricsSink),
-    )?;
+    let engine = SearchEngine::new(&ctx.config, None, ctx.shutdown.clone())?;
 
     let out = resolve_path(&ctx.config.log_dir, "example.log")?;
     if let Some(parent) = out.parent() {
@@ -310,7 +299,6 @@ mod tests {
             &ctx.config,
             None,
             ctx.shutdown.clone(),
-            Arc::new(TracingMetricsSink),
         )
         .unwrap();
         let outcome = engine.search(&spec, &sig, &pk).unwrap();
@@ -340,7 +328,6 @@ mod tests {
             &ctx.config,
             None,
             ctx.shutdown.clone(),
-            Arc::new(TracingMetricsSink),
         )
         .unwrap();
         let outcome = engine.search(&spec, &sig, &pk).unwrap();

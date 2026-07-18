@@ -20,10 +20,9 @@ use k256::{
 };
 use nonce_cracker::{
     derive_affine_constants, derive_private_key, verify_ecdsa_signature, AppContext, Config,
-    SearchEngine, SearchSpec, Signature, TracingMetricsSink,
+    SearchEngine, SearchSpec, Signature,
 };
 use rand::Rng;
-use std::sync::Arc;
 
 fn main() {
     let bits: u32 = std::env::args()
@@ -99,7 +98,6 @@ fn main() {
         &ctx.config,
         None,
         ctx.shutdown.clone(),
-        Arc::new(TracingMetricsSink),
     )
     .unwrap();
 

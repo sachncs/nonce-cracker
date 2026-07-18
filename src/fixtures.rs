@@ -1,14 +1,13 @@
 //! Shared test fixtures and helpers used by unit tests across the crate.
 
 use crate::{
-    config::Config, context::ShutdownToken, domain::Signature, metrics::TracingMetricsSink,
+    config::Config, context::ShutdownToken, domain::Signature,
     search::SearchEngine,
 };
 use k256::{
     elliptic_curve::{sec1::ToEncodedPoint, PrimeField},
     ProjectivePoint, PublicKey, Scalar,
 };
-use std::sync::Arc;
 
 /// A pre-built valid `(Signature, PublicKey)` using a known private key.
 ///
@@ -79,7 +78,6 @@ pub fn make_engine(threads: usize) -> SearchEngine {
         &config,
         Some(threads),
         ShutdownToken::new(),
-        Arc::new(TracingMetricsSink),
     )
     .unwrap()
 }

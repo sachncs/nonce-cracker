@@ -20,13 +20,11 @@ use crate::{
     crypto::{derive_affine_constants, derive_private_key, scalar_hex},
     domain::{SearchOutcome, SearchSpec, Signature},
     error::{EngineError, Result},
-    metrics::{MetricsSink, SearchReport},
 };
 use k256::{
     elliptic_curve::sec1::ToEncodedPoint, AffinePoint, ProjectivePoint, PublicKey, Scalar,
 };
 use rayon::ThreadPool;
-use std::sync::Arc;
 use std::time::Instant;
 
 /// Maximum candidate count for which the parallel scan is used.
@@ -45,7 +43,6 @@ pub struct SearchEngine {
     pool: ThreadPool,
     thread_count: usize,
     shutdown: ShutdownToken,
-    metrics: Arc<dyn MetricsSink + Send + Sync>,
     /// Optional directory where checkpoint files are written before each
     /// search and removed on completion.
     checkpoint_dir: Option<std::path::PathBuf>,
@@ -73,7 +70,6 @@ impl SearchEngine {
         config: &Config,
         threads: Option<usize>,
         shutdown: ShutdownToken,
-        metrics: Arc<dyn MetricsSink + Send + Sync>,
     ) -> Result<Self> {
         let max_threads = config.max_threads;
         let thread_count = match threads {
@@ -98,7 +94,6 @@ impl SearchEngine {
             pool,
             thread_count,
             shutdown,
-            metrics,
             checkpoint_dir: Some(config.checkpoint_dir.clone()),
         })
     }
@@ -246,12 +241,15 @@ impl SearchEngine {
     }
 
     fn emit_metrics(&self, start: Instant, outcome: &SearchOutcome) {
-        self.metrics.emit(&SearchReport {
-            elapsed: start.elapsed(),
-            found: outcome.nonce.is_some(),
-            nonce: outcome.nonce,
-            threads: self.thread_count,
-        });
+        let elapsed = start.elapsed();
+        tracing::info!(
+            target: "nonce-cracker::metrics",
+            event = "search_complete",
+            found = outcome.nonce.is_some(),
+            nonce = ?outcome.nonce,
+            elapsed_sec = format!("{:.3}", elapsed.as_secs_f64()),
+            threads = self.thread_count,
+        );
     }
 }
 
@@ -262,13 +260,11 @@ impl SearchEngine {
         pool: ThreadPool,
         thread_count: usize,
         shutdown: ShutdownToken,
-        metrics: Arc<dyn MetricsSink + Send + Sync>,
     ) -> Self {
         Self {
             pool,
             thread_count,
             shutdown,
-            metrics,
             checkpoint_dir: None,
         }
     }

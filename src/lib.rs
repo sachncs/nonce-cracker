@@ -24,7 +24,6 @@ mod crypto;
 mod domain;
 mod error;
 pub mod logging;
-mod metrics;
 pub mod search;
 
 #[cfg(test)]
@@ -37,7 +36,6 @@ pub use config::ConfigError;
 pub use context::{AppContext, ShutdownToken};
 pub use domain::{SearchOutcome, SearchSpec, Signature};
 pub use error::{CryptoError, Error, RangeError, Result};
-pub use metrics::{MetricsSink, SearchReport, TracingMetricsSink};
 pub use search::SearchEngine;
 
 // Cryptographic utilities
