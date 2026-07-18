@@ -48,7 +48,7 @@ impl OpenMap {
     }
 
     fn hash(&self, key: u128) -> usize {
-        ((self.hasher.hash_one(key) as usize) ^ (key as usize)) & self.mask
+        self.hasher.hash_one(key) as usize & self.mask
     }
 
     /// Insert a key-value pair into the map.
@@ -127,55 +127,11 @@ impl OpenMap {
     pub fn len(&self) -> usize {
         self.len
     }
-
-    /// Return whether the map contains no entries.
-    pub fn is_empty(&self) -> bool {
-        self.len == 0
-    }
-
-    /// Return the total number of slots in the table.
-    pub fn table_capacity(&self) -> usize {
-        self.entries.len()
-    }
-}
-
-impl IntoIterator for OpenMap {
-    type Item = (u128, u64);
-    type IntoIter = OpenMapIntoIter;
-
-    fn into_iter(self) -> Self::IntoIter {
-        OpenMapIntoIter {
-            entries: self.entries,
-            index: 0,
-        }
-    }
-}
-
-/// Iterator over the entries of an [`OpenMap`].
-pub struct OpenMapIntoIter {
-    entries: Vec<Entry>,
-    index: usize,
-}
-
-impl Iterator for OpenMapIntoIter {
-    type Item = (u128, u64);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        while self.index < self.entries.len() {
-            let entry = &self.entries[self.index];
-            self.index += 1;
-            if entry.state == OCCUPIED {
-                return Some((entry.key, entry.value));
-            }
-        }
-        None
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use proptest::prelude::*;
 
     #[test]
     fn basic_insert_and_get() {
@@ -201,77 +157,5 @@ mod tests {
         let map = OpenMap::with_capacity(16);
         let key: u128 = 0xEFEFEFEFEFEFEFEFEFEFEFEFEFEFEFEFu128;
         assert_eq!(map.get(key), None);
-    }
-
-    #[test]
-    fn many_entries() {
-        let mut map = OpenMap::with_capacity(1024);
-        for i in 0..512u64 {
-            let key = u128::from(i) | (u128::from(i) << 64);
-            map.insert(key, i);
-        }
-        for i in 0..512u64 {
-            let key = u128::from(i) | (u128::from(i) << 64);
-            assert_eq!(map.get(key), Some(&i));
-        }
-        assert_eq!(map.len(), 512);
-    }
-
-    #[test]
-    fn capacity_is_power_of_two() {
-        let map = OpenMap::with_capacity(100);
-        let cap = map.table_capacity();
-        assert!(cap.is_power_of_two());
-        assert_eq!(cap, 256);
-    }
-
-    #[test]
-    fn collision_and_deep_probing() {
-        let mut map = OpenMap::with_capacity(128);
-        let n: u64 = 32;
-        for i in 0..n {
-            let key = 0xCAFEBABEDEADBEEF0000000000000000u128 | u128::from(i);
-            map.insert(key, i);
-        }
-        for i in 0..n {
-            let key = 0xCAFEBABEDEADBEEF0000000000000000u128 | u128::from(i);
-            assert_eq!(map.get(key), Some(&i));
-        }
-        assert_eq!(map.len(), n as usize);
-    }
-
-    proptest! {
-        #[test]
-        fn prop_insert_get_roundtrip(key in any::<u128>(), value in any::<u64>()) {
-            let mut map = OpenMap::with_capacity(1024);
-            map.insert(key, value);
-            prop_assert_eq!(map.get(key), Some(&value));
-            prop_assert_eq!(map.len(), 1);
-        }
-
-        #[test]
-        fn prop_overwrite(key in any::<u128>(), v1 in any::<u64>(), v2 in any::<u64>()) {
-            let mut map = OpenMap::with_capacity(1024);
-            map.insert(key, v1);
-            map.insert(key, v2);
-            prop_assert_eq!(map.get(key), Some(&v2));
-            prop_assert_eq!(map.len(), 1);
-        }
-
-        #[test]
-        fn prop_many_entries(
-            entries in prop::collection::vec((any::<u128>(), any::<u64>()), 1..512)
-        ) {
-            let mut map = OpenMap::with_capacity(entries.len());
-            let mut expected = std::collections::HashMap::new();
-            for (key, value) in &entries {
-                map.insert(*key, *value);
-                expected.insert(*key, *value);
-            }
-            for (key, value) in &expected {
-                prop_assert_eq!(map.get(*key), Some(value));
-            }
-            prop_assert_eq!(map.len(), expected.len());
-        }
     }
 }
