@@ -1,0 +1,49 @@
+# Cargo-deny configuration for dependency security and license checking
+# Documentation: https://embarkstudios.github.io/cargo-deny/
+
+[graph]
+targets = [
+    { triple = "x86_64-unknown-linux-gnu" },
+    { triple = "x86_64-unknown-linux-musl" },
+    { triple = "x86_64-apple-darwin" },
+    { triple = "aarch64-apple-darwin" },
+    { triple = "x86_64-pc-windows-msvc" },
+]
+
+[advisories]
+version = 2
+db-path = "~/.cargo/advisory-db"
+db-urls = ["https://github.com/rustsec/advisory-db"]
+yanked = "deny"
+
+[licenses]
+version = 2
+allow = [
+    "MIT",
+    "BSD-3-Clause",
+    "Unicode-3.0",
+]
+confidence-threshold = 0.8
+
+[bans]
+# Deny multiple versions of the same crate unless explicitly allowed
+multiple-versions = "warn"
+wildcards = "warn"
+highlight = "all"
+
+# Certain crates we don't want multiple versions of
+[[bans.deny]]
+name = "syn"
+deny-multiple-versions = true
+
+[[bans.deny]]
+name = "serde"
+deny-multiple-versions = true
+
+[sources]
+# Allow only crates.io
+unknown-registry = "deny"
+unknown-git = "deny"
+
+[sources.allow-org]
+github = []  # List allowed GitHub orgs here if using git dependencies
