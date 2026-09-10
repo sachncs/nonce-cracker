@@ -1,0 +1,8 @@
+title: "nonce-cracker"
+description: "High-speed parallel ECDSA key search for secp256k1 using an affine relation attack."
+theme: minima
+logo: /assets/logo.svg
+show_downloads: false
+permalink: /:title/
+plugins:
+  - jekyll-feed
