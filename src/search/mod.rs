@@ -186,6 +186,9 @@ impl SearchEngine {
             match bsgs_result {
                 Ok(result) => result,
                 Err(crate::error::Error::Engine(crate::error::EngineError::BsgsMemoryLimit)) => {
+                    if scan.start < 0 {
+                        return Err(EngineError::KangarooNegativeStart.into());
+                    }
                     tracing::warn!("BSGS memory limit exceeded; falling back to kangaroo");
                     // Auto-tune distinguished-point density:
                     // target ~1000 total DPs to balance memory and collision probability.
