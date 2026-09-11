@@ -611,9 +611,9 @@ Benchmarks cover:
 ## Roadmap
 
 - **v0.6.x** — Current: signed range handling, structured errors, refined OpenMap (released)
-- **v0.7.0** — Adaptive algorithm selection based on online profiling
+- **v0.7.0** — Adaptive algorithm selection based on online profiling; checkpoint write-side scaffolding for kangaroo
 - **v0.8.0** — GPU acceleration for the BSGS and kangaroo hot paths
-- **v1.0.0** — Stable API, hardened checkpointing, signed range support on all algorithms
+- **v1.0.0** — Stable API. Hardened checkpointing and kangaroo-signed-range support remain pending — see the open issues for tracking.
 
 ---
 
