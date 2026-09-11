@@ -112,7 +112,9 @@ pub enum EngineError {
     #[error("BSGS memory limit exceeded")]
     BsgsMemoryLimit,
     /// Pollard's kangaroo was dispatched with a negative `start`.
-    #[error("kangaroo dispatch requires start >= 0 (signed ranges are only supported by scan/BSGS)")]
+    #[error(
+        "kangaroo dispatch requires start >= 0 (signed ranges are only supported by scan/BSGS)"
+    )]
     KangarooNegativeStart,
 }
 
