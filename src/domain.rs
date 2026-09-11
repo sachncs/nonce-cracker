@@ -61,12 +61,16 @@ pub struct SearchSpec {
 }
 
 impl SearchSpec {
+    /// Hard upper bound on candidate count to prevent absurd ranges.
+    const MAX_TOTAL: u128 = 1u128 << 64;
+
     /// Create a new `SearchSpec`, validating invariants.
     ///
     /// # Errors
     ///
     /// Returns [`RangeError::StepNotPositive`], [`RangeError::EndBeforeStart`],
-    /// or [`RangeError::RangeOverflow`] if the invariants are violated.
+    /// [`RangeError::RangeOverflow`], or [`RangeError::RangeTooLarge`] if the
+    /// invariants are violated.
     pub fn new(start: i128, end: i128, step: i128) -> Result<Self> {
         if step <= 0 {
             return Err(RangeError::StepNotPositive.into());
@@ -76,20 +80,13 @@ impl SearchSpec {
         }
         let span = end.checked_sub(start).ok_or(RangeError::RangeOverflow)?;
         let n = span / step;
-        let _ = start
-            .checked_add(n.checked_mul(step).ok_or(RangeError::RangeOverflow)?)
-            .ok_or(RangeError::RangeOverflow)?;
+        let total = u128::try_from(n.checked_add(1).ok_or(RangeError::RangeTooLarge)?)
+            .map_err(|_| RangeError::RangeTooLarge)?;
+        if total > Self::MAX_TOTAL {
+            return Err(RangeError::RangeTooLarge.into());
+        }
         Ok(Self { start, end, step })
     }
-
-    /// Total number of candidates: `floor((end - start) / step) + 1`.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`RangeError::RangeOverflow`] or [`RangeError::RangeTooLarge`]
-    /// if the computation overflows.
-    /// Hard upper bound on candidate count to prevent absurd ranges.
-    const MAX_TOTAL: u128 = 1u128 << 64;
 
     /// Total number of candidates: `floor((end - start) / step) + 1`.
     ///
@@ -108,6 +105,7 @@ impl SearchSpec {
         if total > Self::MAX_TOTAL {
             return Err(RangeError::RangeTooLarge.into());
         }
+        debug_assert!(total <= Self::MAX_TOTAL);
         Ok(total)
     }
 }
@@ -174,5 +172,12 @@ mod tests {
     fn test_search_spec_range_overflow() {
         let err = SearchSpec::new(i128::MIN, i128::MAX, 1).unwrap_err();
         assert!(err.to_string().contains("overflow"));
+    }
+
+    #[test]
+    fn test_search_spec_range_too_large() {
+        // (end - start) / step + 1 > 2^64 must fail at construction time.
+        let err = SearchSpec::new(0, (1u128 << 64) as i128 + 10, 1).unwrap_err();
+        assert!(err.to_string().contains("range too large"));
     }
 }
