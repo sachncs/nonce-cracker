@@ -139,6 +139,7 @@ if let SearchOutcome::Found { private_key, .. } = outcome {
 | `--threads <NUM>` | Worker thread count | CPU core count |
 | `--quiet` | Suppress console output | `false` |
 | `--outfile <PATH>` | Search report file name or path | `search.log` |
+| `--offset <HEX>` | Offset to add back to the recovered private key after the search (`d = alpha * k + offset`) | `0` |
 
 ### Logging environment variables
 
@@ -212,6 +213,26 @@ nonce-cracker run \
   --pubkey 03f01d6b9018ab421dd410404cb869072065522bf85734008f105cf385a023a80f \
   --start 0 --end 10000 --threads 8 --outfile results.log
 ```
+
+### Offset search
+
+`--offset` adjusts the recovered private key by a caller-supplied scalar
+(useful when the nonce range is anchored near `n/2`, e.g. for signed
+nonces in constrained ranges around the curve-order midpoint):
+
+```bash
+nonce-cracker run \
+  --r 0x37a4aef1f8423ca076e4b7d99a8cabff40ddb8231f2a9f01081f15d7fa65c1ba \
+  --s 0xe026eb94e61bcdc41f0ee8cd7b97eda899ce5856d3a32360d742b13d717ff2a8 \
+  --z 0x0000000000000000000000000000000000000000000000000000000000000001 \
+  --pubkey 03f01d6b9018ab421dd410404cb869072065522bf85734008f105cf385a023a80f \
+  --start -1000 --end 1000 \
+  --offset 0x0000000000000000000000000000000000000000000000000000000000000fff
+```
+
+The search internally subtracts `offset` from the target public key and
+sets `z = 0` for the affine derivation, then re-adds `offset` to the
+recovered `d` before reporting.
 
 ### Run the BSGS end-to-end benchmark
 
