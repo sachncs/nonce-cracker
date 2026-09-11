@@ -74,6 +74,8 @@ When deploying in production:
 
 3. **Error messages**: Error messages may contain sensitive information in debug builds. Use release builds for production.
 
+4. **Checkpoint file sensitivity**: The plaintext checkpoint file under `NONCE_CRACKER_CHECKPOINT_DIR` contains the signature `(r, s, z)`, the target public key, and the search range. On Unix systems it is created with `0600` permissions and removed on successful completion; if the process is killed mid-search the file may be left on disk. Mount the checkpoint directory on a filesystem with strict permissions (e.g. `tmpfs` with `mode=0700`) and add it to your incident-response sweep.
+
 ## Security Testing
 
 Regular security measures include:
