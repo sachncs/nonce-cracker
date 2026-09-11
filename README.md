@@ -5,8 +5,6 @@
     <a href="#installation"><img src="https://img.shields.io/badge/rust-1.75%20%7C%20stable-orange?logo=rust" alt="Rust"></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="License"></a>
     <a href="https://github.com/sachncs/nonce-cracker/actions"><img src="https://img.shields.io/github/actions/workflow/status/sachncs/nonce-cracker/ci.yml?branch=master" alt="CI"></a>
-    <a href="https://crates.io/crates/nonce-cracker"><img src="https://img.shields.io/crates/v/nonce-cracker" alt="crates.io"></a>
-    <a href="https://docs.rs/nonce-cracker"><img src="https://img.shields.io/docsrs/nonce-cracker" alt="docs.rs"></a>
     <a href="https://github.com/sachncs/nonce-cracker/stargazers"><img src="https://img.shields.io/github/stars/sachncs/nonce-cracker" alt="Stars"></a>
   </p>
 </p>
@@ -51,12 +49,6 @@ where `alpha = r^-1 * s` and `beta = r^-1 * z`. The tool precomputes these affin
 ---
 
 ## Installation
-
-### From crates.io
-
-```bash
-cargo install nonce-cracker
-```
 
 ### From source
 
