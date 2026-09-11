@@ -622,7 +622,7 @@ Benchmarks cover:
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, coding standards, and pull request process.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, coding standards, and pull request process. For usage questions and general discussion, use [GitHub Discussions](https://github.com/sachncs/nonce-cracker/discussions) instead of opening an issue.
 
 ## Code of Conduct
 
