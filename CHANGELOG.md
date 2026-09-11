@@ -36,14 +36,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Auto-tuned kangaroo `d` parameter**: distinguished-point bit density is now computed as `log2(threads * sqrt(N) / 1000)` and clamped to `[8, 24]`, balancing memory and collision probability per range size instead of using a fixed `d=16`.
 
 ### Fixed
-- `file.try_clone().expect()` panic in logging replaced with `LogWriter` enum and `io::Sink` fallback.
 - Removed dead `bsgs_max_m` test-only field from production `SearchEngine` struct.
 - Removed dead segmented BSGS code path (quadratic blowup).
 - `OpenMap::insert` auto-grows table at 0.7 load factor instead of panicking on saturation.
 - **Checkpoint I/O no longer silently swallowed**: `write` failures are logged with `warn!`; `remove` returns `io::Result<()>` and failures are logged.
-- **Hardened checkpoint deserialization**: `Checkpoint::read_from` now rejects malformed lines, unknown keys, and missing required fields instead of silently substituting defaults.
 - **Signal-handler failure is fatal**: `ctrlc::set_handler` error now exits the process instead of logging and continuing without graceful shutdown.
-- **Logging Sink fallback is visible**: emits a one-time `eprintln!` warning when the log file descriptor cannot be cloned.
 - **Stdout write failures are visible**: `emit_summary` now logs a `warn!` when `writeln!` to stdout fails (e.g. broken pipe).
 - **RwLock poisoning no longer aborts**: kangaroo DP table locks use `unwrap_or_else(|e| e.into_inner())` to recover from poisoned locks instead of panicking.
 - **Rayon thread panics eliminated**: `.expect()` calls inside BSGS and parallel-scan closures replaced with `let else` early returns that log a warning and skip the thread.
@@ -60,7 +57,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Dropped `KangarooParams::validate()` (duplicate of `new()`'s validation).
   - `derive_private_key(nonce: u128, …)` — the `i128` signature only existed to support two unit tests.
   - Trimmed `OpenMap` public surface (kept `with_capacity`, `insert`, `get`, `len`, `is_empty`); auto-grew proptest dropped.
-  - Dropped `LogWriter` sink fallback in `logging.rs` (file clone failures now bubble up instead of being silently swallowed).
   - Dropped `AppContext` wrapper in `context.rs` — `run_search` / `run_example` take `(&Config, &ShutdownToken)` directly.
   - Removed `signal-hook` from `[dependencies]` (was never imported; `ctrlc` already covers signal handling).
 
