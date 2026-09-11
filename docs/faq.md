@@ -29,10 +29,12 @@ docker build -t nonce-cracker .
 docker run nonce-cracker example
 ```
 
-Or install from crates.io if you already have a Rust toolchain:
+Or build from source if you already have a Rust toolchain:
 
 ```bash
-cargo install nonce-cracker
+git clone https://github.com/sachncs/nonce-cracker.git
+cd nonce-cracker
+cargo build --release
 ```
 
 ## Usage
