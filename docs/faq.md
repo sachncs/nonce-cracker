@@ -18,7 +18,7 @@ Currently, only **secp256k1** is supported (the curve used in Bitcoin and Ethere
 
 ### What Rust version is required?
 
-Rust **1.75+** (stable) is required. The project includes a `rust-toolchain.toml` that pins to stable with `rustfmt` and `clippy` components.
+Rust **1.87+** (stable) is required. The project includes a `rust-toolchain.toml` that pins to stable with `rustfmt` and `clippy` components.
 
 ### Can I install without Rust?
 

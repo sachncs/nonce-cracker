@@ -93,7 +93,7 @@ make clippy   # Run lints
 ./cleanup.sh  # Remove build artifacts, logs, checkpoints, temp files
 ```
 
-**Requirements**: Rust 1.75+ (stable). macOS, Linux, Windows (any platform with
+**Requirements**: Rust 1.87+ (stable). macOS, Linux, Windows (any platform with
 Rust support). Multi-core CPU recommended for parallel search.
 
 ---
@@ -595,7 +595,7 @@ Benchmarks cover:
 
 | Category | Technology |
 |----------|------------|
-| Language | Rust 1.75+ (stable) |
+| Language | Rust 1.87+ (stable) |
 | Crypto library | [k256](https://crates.io/crates/k256) (secp256k1) — locally patched |
 | CLI | [clap](https://crates.io/crates/clap) (derive) |
 | Parallelism | [rayon](https://crates.io/crates/rayon) (work-stealing) |

@@ -6,7 +6,7 @@ Thank you for your interest in contributing to nonce-cracker!
 
 ### Prerequisites
 
-- Rust 1.75+
+- Rust 1.87+
 - Git
 - make (optional, for convenience commands)
 
