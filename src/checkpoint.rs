@@ -6,8 +6,9 @@
 //! implemented.
 
 use std::{
-    fs::{self, File},
+    fs::{self, OpenOptions},
     io::{self, Write},
+    os::unix::fs::OpenOptionsExt,
     path::{Path, PathBuf},
 };
 
@@ -52,7 +53,10 @@ impl Checkpoint {
     }
 }
 
-/// Write a checkpoint file to `dir`.  Returns the path of the written file.
+/// Write a checkpoint file to `dir` with owner-only (0600) permissions.
+///
+/// Returns the path of the written file. On non-Unix targets (Windows) the
+/// `mode` call is a no-op and the file inherits default permissions.
 pub fn write(dir: &Path, checkpoint: &Checkpoint) -> io::Result<PathBuf> {
     if !dir.exists() {
         fs::create_dir_all(dir)?;
@@ -62,7 +66,12 @@ pub fn write(dir: &Path, checkpoint: &Checkpoint) -> io::Result<PathBuf> {
         checkpoint.algorithm,
         std::process::id()
     ));
-    let mut file = File::create(&path)?;
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(&path)?;
     checkpoint.write_to(&mut file)?;
     file.flush()?;
     Ok(path)
@@ -109,5 +118,28 @@ mod tests {
     fn remove_nonexistent_is_ok() {
         let tmp = std::env::temp_dir().join("nonce_cracker_test_remove_nonexistent");
         assert!(super::remove(&tmp).is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn checkpoint_file_has_owner_only_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = std::env::temp_dir().join("nonce_cracker_test_checkpoint_perms");
+        let cp = Checkpoint {
+            algorithm: "scan".into(),
+            start: 0,
+            step: 1,
+            total: 10,
+            r_hex: "0x01".into(),
+            s_hex: "0x02".into(),
+            z_hex: "0x03".into(),
+            pubkey_hex: "0x04".into(),
+            last_index: None,
+        };
+        let path = super::write(&dir, &cp).unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "checkpoint file should be owner-readable+writable only");
+        let _ = std::fs::remove_file(&path);
     }
 }
