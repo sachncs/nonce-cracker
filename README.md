@@ -9,7 +9,17 @@
   </p>
 </p>
 
-**nonce-cracker** recovers private keys from a single ECDSA signature when the nonce is within a known search range. From the signature equation:
+**nonce-cracker** recovers an ECDSA private key from a single secp256k1 signature when the nonce is biased or constrained to a known search range. It is built for Bitcoin protocol researchers, cryptography students, and authorized penetration testers who need to validate that a signing implementation produces nonces inside an attacker's window.
+
+### Why use nonce-cracker?
+
+- **Single-signature attack**: no second signature, weak PRNG output, or chosen-message access required — only the public key and one signature.
+- **Three-tier dispatch**: parallel scan for `N ≤ 2^32`, parallel BSGS for `2^32 < N ≤ 2^52`, Pollard's kangaroo for `N > 2^52` candidates.
+- **Production-grade hygiene**: structured tracing logs, sensitive-scalar zeroization, dependency gating via `cargo-deny`, cross-platform tests.
+
+### How it works
+
+From the ECDSA equation:
 
 ```
 s = k^-1(z + r * d)  (mod n)
@@ -21,7 +31,13 @@ the private key can be rewritten as:
 d = alpha * k - beta  (mod n)
 ```
 
-where `alpha = r^-1 * s` and `beta = r^-1 * z`. The tool precomputes these affine constants, then searches for the nonce `k` using a highly optimized parallel scan (for ranges up to 2^32 candidates), a parallel Baby-Step Giant-Step (BSGS) algorithm (for medium ranges up to 2^52 candidates), or Pollard's kangaroo (for massive ranges up to 2^64 candidates).
+where `alpha = r^-1 * s` and `beta = r^-1 * z`. The tool precomputes these affine constants, then searches for the nonce `k` using the algorithm matched to the range size above.
+
+### When NOT to use this tool
+
+- You need to recover keys from wallets you do not own or from signatures you did not generate.
+- You need real-time signing: `nonce-cracker` is an offline key-recovery tool, not a signing oracle.
+- The nonce is high-entropy: the search space is then too large for any current algorithm.
 
 ---
 
