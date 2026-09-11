@@ -167,9 +167,6 @@ fn bench_kangaroo(c: &mut Criterion) {
     group.finish();
 }
 
-// TODO: Add BSGS with FxHashMap vs OpenMap comparison benchmark.
-// The old FxHashMap BSGS code has been fully migrated to OpenMap.
-
 criterion_group!(
     benches,
     bench_scalar_invert,
