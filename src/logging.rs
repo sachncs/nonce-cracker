@@ -57,9 +57,7 @@ pub fn init(log_dir: &Path, console: bool) -> Result<(), LoggingError> {
         .map_err(|e| LoggingError::Logger(e.to_string()))?;
 
     let subscriber = tracing_subscriber::registry::Registry::default().with(env_filter);
-    let fmt_layer = tracing_subscriber::fmt::layer()
-        .compact()
-        .with_writer(move || file.try_clone().expect("log file descriptor cloneable"));
+    let fmt_layer = tracing_subscriber::fmt::layer().compact().with_writer(file);
 
     if console {
         let console_layer = tracing_subscriber::fmt::layer()
