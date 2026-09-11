@@ -1,6 +1,6 @@
 # Multi-stage build for production-grade container
 # Stage 1: Build environment
-FROM rust:1.78.0-slim-bookworm AS builder
+FROM rust:1.87.0-slim-bookworm AS builder
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y \
