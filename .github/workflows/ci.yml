@@ -49,5 +49,15 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: taiki-e/install-action@cargo-deny
-      - name: Check dependencies
+      - name: Check dependencies (license, bans, advisories)
         run: cargo deny check
+
+  msrv:
+    name: MSRV (Rust 1.75)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@1.75
+      - uses: Swatinem/rust-cache@v2
+      - name: Verify MSRV build
+        run: cargo build --all-targets
