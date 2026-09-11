@@ -76,7 +76,7 @@ We follow [Conventional Commits](https://www.conventionalcommits.org/):
 **Examples:**
 
 ```bash
-git commit -m "feat(recover): add recover command with user-specified argument order"
+git commit -m "feat(run): add new CLI flag for offset search"
 git commit -m "fix(hex): handle uppercase 0X prefix in range parsing"
 git commit -m "docs: update README with new CLI examples"
 ```
@@ -109,24 +109,31 @@ We follow the [Rust Style Guide](https://doc.rust-lang.org/style-guide/):
 Document all public items with rustdoc:
 
 ```rust
-/// Computes the modular inverse using extended Euclidean algorithm.
+/// Compute the affine constants `alpha` and `beta` from a single ECDSA signature.
 ///
 /// # Arguments
 ///
-/// * `a` - The value to invert
-/// * `n` - The modulus
+/// * `sig` - The signature triplet `(r, s, z)`.
 ///
 /// # Returns
 ///
-/// The value a⁻¹ mod n, or `Error::Calculation` if no inverse exists.
+/// `(alpha, beta)` such that `d = alpha * k - beta (mod n)` for the nonce `k`
+/// that produced the signature, or [`CryptoError::RNotInvertible`] if `r` has
+/// no inverse modulo the curve order.
 ///
 /// # Example
 ///
 /// ```
-/// let n = parse_hex(CURVE_ORDER_HEX).unwrap();
-/// let inv = mod_inverse(&7, &n)?;
+/// use nonce_cracker::{derive_affine_constants, parse_scalar, Signature};
+///
+/// let sig = Signature::new(
+///     parse_scalar("0x1").unwrap(),
+///     parse_scalar("0x3").unwrap(),
+///     parse_scalar("0x5").unwrap(),
+/// );
+/// let (alpha, beta) = derive_affine_constants(&sig).unwrap();
 /// ```
-pub fn mod_inverse(a: &BigInt, n: &BigInt) -> Result<BigInt> {
+pub fn derive_affine_constants(sig: &Signature) -> Result<(Scalar, Scalar)> {
     // ...
 }
 ```
@@ -168,14 +175,15 @@ cargo test --doc
 mod tests {
     use super::*;
 
-    /// Tests that modular inverse of a number equals 1 when multiplied.
+    /// Tests that `derive_private_key(0, alpha, beta) == -beta`.
     #[test]
-    fn test_mod_inverse() {
-        let n = parse_hex(CURVE_ORDER_HEX).unwrap();
-        let a = BigInt::from(7u64);
-        let inv = mod_inverse(&a, &n).unwrap();
-        let prod = (a * inv) % &n;
-        assert_eq!(prod, BigInt::one());
+    fn test_derive_private_key_identity() {
+        use k256::elliptic_curve::PrimeField;
+        use k256::Scalar;
+
+        let alpha = Scalar::from(3u64);
+        let beta = Scalar::from(7u64);
+        assert_eq!(derive_private_key(0, alpha, beta), Scalar::ZERO - beta);
     }
 }
 ```
@@ -195,7 +203,7 @@ Before pushing:
 ### PR Title
 
 Follow conventional commits:
-- `feat(recover): add new CLI command`
+- `feat(run): add new CLI command`
 - `fix(crypto): correct modular inverse calculation`
 - `docs: update installation instructions`
 
