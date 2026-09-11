@@ -20,9 +20,12 @@ cd nonce-cracker
 # Add upstream remote
 git remote add upstream https://github.com/sachncs/nonce-cracker.git
 
-# Install pre-commit hooks
+# Install pre-commit hooks (runs cargo fmt --check and cargo clippy)
 make install-hooks
 ```
+
+The pre-commit hook lives at `.githooks/pre-commit` and is copied into
+`.git/hooks/` by `make install-hooks`.
 
 ## Development Workflow
 

@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Pre-commit hook: enforce formatting and clippy cleanliness locally so
+# contributors catch issues before pushing. Mirrors the CI quality job.
+
+set -e
+
+cargo fmt --all -- --check
+cargo clippy --all-targets --all-features -- -D warnings
