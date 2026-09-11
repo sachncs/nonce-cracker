@@ -36,7 +36,7 @@ This project includes several security-focused features for production deploymen
 ### Dependency Security
 
 - `cargo-deny` configuration for license/audit checks
-- CI runs `cargo audit` on every PR
+- CI runs `cargo deny check` (license and ban checks) on every PR
 - Dependencies pinned in Cargo.lock
 - Minimal dependency tree
 
@@ -45,7 +45,7 @@ This project includes several security-focused features for production deploymen
 If you discover a security vulnerability, please report it responsibly:
 
 1. **Do not** open a public issue
-2. Email security concerns to: security@example.com
+2. Use [GitHub Security Advisories](https://github.com/sachncs/nonce-cracker/security/advisories/new) (preferred), or email `security@sachn.dev`
 3. Include detailed reproduction steps
 4. Allow time for response before public disclosure
 

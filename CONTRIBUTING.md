@@ -233,7 +233,7 @@ Include:
 
 ## Code of Conduct
 
-This project follows the [Contributor Covenant Code of Conduct](CODE_OF_CONDUCT.md). By participating, you are expected to uphold this code. Please report unacceptable behavior to security@example.com.
+This project follows the [Contributor Covenant Code of Conduct](CODE_OF_CONDUCT.md). By participating, you are expected to uphold this code. Please report unacceptable behavior via [GitHub Security Advisories](https://github.com/sachncs/nonce-cracker/security/advisories/new) or by emailing `security@sachn.dev`.
 
 ## License
 
