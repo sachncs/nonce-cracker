@@ -17,6 +17,7 @@ readme = "README.md"
 clap = { version = "4.5", features = ["derive"] }
 ctrlc = "3.4"
 hex = "0.4"
+getrandom = "0.2"
 k256 = { version = "0.13", default-features = false, features = ["arithmetic", "ecdsa", "pkcs8", "std"] }
 rand = "0.10"
 rayon = "1.8"
