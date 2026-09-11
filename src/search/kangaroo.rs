@@ -58,7 +58,10 @@ pub fn search(
     let total_f64 = params.total as f64;
     let avg_jump = (total_f64.sqrt() / 2.0).max(1.0);
 
-    // Deterministic seed derived from search parameters so walks are reproducible.
+    // Seed the kangaroo walk from the public search parameters so two runs
+    // with identical inputs produce identical jump tables (reproducible /
+    // debuggable), and mix in fresh OS entropy so the walk is not fully
+    // predictable from public inputs alone.
     let seed = {
         let mut s = [0u8; 32];
         let alpha_bytes = params.alpha.to_bytes();
@@ -73,6 +76,11 @@ pub fn search(
         }
         for (i, b) in step_bytes.iter().enumerate() {
             s[(i + 8) % 32] ^= *b;
+        }
+        let mut os_seed = [0u8; 32];
+        getrandom::getrandom(&mut os_seed).expect("OS RNG available");
+        for (dst, src) in s.iter_mut().zip(os_seed.iter()) {
+            *dst ^= *src;
         }
         s
     };
