@@ -45,9 +45,6 @@ pub mod ecdh;
 #[cfg(feature = "ecdsa-core")]
 pub mod ecdsa;
 
-#[cfg(feature = "schnorr")]
-pub mod schnorr;
-
 #[cfg(any(feature = "test-vectors", test))]
 pub mod test_vectors;
 

@@ -2,14 +2,9 @@
 
 pub(crate) mod affine;
 mod field;
-#[cfg(feature = "hash2curve")]
-mod hash2curve;
 mod mul;
 pub(crate) mod projective;
 pub(crate) mod scalar;
-
-#[cfg(test)]
-mod dev;
 
 pub use field::FieldElement;
 
