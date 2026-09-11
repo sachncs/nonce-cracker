@@ -1,4 +1,7 @@
 <p align="center">
+  <img src="assets/logo.svg" alt="nonce-cracker" width="96" height="96">
+</p>
+<p align="center">
   <h1 align="center">nonce-cracker</h1>
   <p align="center">High-speed parallel ECDSA private key recovery for secp256k1 using a single-signature affine relation attack.</p>
   <p align="center">
