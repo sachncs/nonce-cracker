@@ -9,7 +9,7 @@ repository = "https://github.com/sachncs/nonce-cracker"
 homepage = "https://github.com/sachncs/nonce-cracker"
 documentation = "https://docs.rs/nonce-cracker"
 keywords = ["ecdsa", "secp256k1", "cryptography", "bitcoin"]
-categories = ["cryptography", "command-line-utilities"]
+categories = ["cryptography", "command-line-interface"]
 readme = "README.md"
 
 [dependencies]
