@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" width="1200" height="630">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#08090B"/>
+      <stop offset="100%" stop-color="#131418"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#F1823A"/>
+      <stop offset="100%" stop-color="#E84816"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#F1823A" stop-opacity="0.25"/>
+      <stop offset="100%" stop-color="#F1823A" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <circle cx="900" cy="315" r="280" fill="url(#glow)"/>
+  <rect x="60" y="60" width="116" height="116" rx="26" fill="url(#accent)"/>
+  <path d="M88 96 V144" stroke="white" stroke-width="11" stroke-linecap="round" fill="none"/>
+  <path d="M88 96 L150 144" stroke="white" stroke-width="11" stroke-linecap="round" fill="none"/>
+  <circle cx="156" cy="96" r="6.5" fill="white"/>
+  <text x="60" y="280" font-family="Inter, sans-serif" font-size="76" font-weight="700" fill="white" letter-spacing="-3">nonce-cracker</text>
+  <text x="60" y="360" font-family="Inter, sans-serif" font-size="32" font-weight="400" fill="#A1A1AA">Recover ECDSA private keys from a single signature.</text>
+  <text x="60" y="500" font-family="JetBrains Mono, monospace" font-size="20" fill="#71717A">$ nonce-cracker run --r 0x... --s 0x... --z 0x... --pubkey 02...</text>
+</svg>

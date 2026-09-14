@@ -3,6 +3,12 @@
 **/*.rs.bk
 *.pdb
 
+# Site build artifacts (Vite/React)
+/site/dist/
+/site/node_modules/
+/site/.vite/
+/site/tsconfig.tsbuildinfo
+
 # IDE
 .idea/
 .vscode/

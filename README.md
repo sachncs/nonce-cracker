@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo.svg" alt="nonce-cracker" width="96" height="96">
+  <img src="site/public/logo.svg" alt="nonce-cracker" width="96" height="96">
 </p>
 <p align="center">
   <h1 align="center">nonce-cracker</h1>
