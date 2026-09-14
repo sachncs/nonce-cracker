@@ -767,7 +767,7 @@ dependencies = [
  "clap",
  "criterion",
  "ctrlc",
- "getrandom 0.2.17",
+ "getrandom 0.4.2",
  "hex",
  "k256",
  "proptest",
